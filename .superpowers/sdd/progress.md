@@ -256,3 +256,31 @@ Task 6: complete (commit 0d2b2a7, 5 项测试, 全量 201) — 界面选实例�
   引擎 ✅（12数字+换实例会变）、实例库 ✅（9条种子）、界面能列实例 ✅
   但选完实例后无任何接口接住：/api/compute 不存在，评估结果不会重算。
   三个零件都在，没接上。→ 追加 Task 7 闭环。
+
+Task 7: complete (9 项测试, 全量 210) —— 闭环：/api/import、/api/library、/api/compute
+  ✅ tools/seed_library.py 种库：data/实例库.json 9 条（幂等，重跑全部跳过不重复）
+  ✅ 关键一战：从库里选办公三条原始实例 + 原始市场状况指数(98/95/95)，
+     POST /api/compute 精确复现 2.83（比准价格 [2.92,2.77,2.8]，离散度 0.05）
+  ✅ 第一等测试 test_swapping_selection_changes_result：换选中的实例A为
+     成交价翻倍的替身 → 2.83 → 3.8，与 test_engine_golden.py 同一扰动
+     同一数学关系（3.8 = round(2.83 + 2.92/3, 2)）—— 证明真穿透引擎
+  ⚠️ 代理发现并修复模型缺口：StoredInstance 原来没存"交易情况指数"
+     （引擎公式必需的数字），只存了文字描述"交易情况"（如"正常"）——
+     两者在 Excel 里位于不同单元格。补字段，importer 复用
+     read_instances() 已读出的值，未重复读表。因库文件此前不存在，
+     无历史数据兼容负担。
+  ⚠️ 自审揪出：市场状况指数=0 会让引擎除零崩 500——已在 compute.py 外层
+     转 400（未改 Task 3 已验收的 market_2026.py）；类别错配主动加固
+     （选农用实例进办公项目会 400，非 brief 明文要求）。
+  ⚠️ 明确标出范围外：src/web/static/index.html 未接 /api/compute——
+     前端选完实例后仍不显示结果，这是浏览器体感上的"未闭环"，
+     四件事清单与验证命令均只要求后端，未列入本任务。
+  - /api/library 设计取舍：收完整可序列化实例对象（与 /api/import 的
+    返回同形状，同一套 to_dict/from_dict），不收编号列表——无状态架构下
+    编号列表无处可查。
+  - /api/compute 采用重传 xlsx（Form+File）而非计划草稿的 {file_id}，
+    延续"输入抽象本轮不做"的既定决定，与 /api/extract、/api/render
+    的既有无状态风格一致。
+  当前全量: 210 passed, mypy clean（src）, ruff clean
+
+进度: 第二轮 7/7 完成，功能环已闭合（细节与自审见 r2-task-7-report.md）

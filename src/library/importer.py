@@ -62,6 +62,7 @@ def import_from_excel(path: Path) -> tuple[StoredInstance, ...]:
                 面积=float(area) if isinstance(area, (int, float)) else 0.0,
                 出租用途=str(sheet.cell(_USAGE_ROW, col).value or "").strip(),
                 交易情况=str(sheet.cell(_TRADE_ROW, col).value or "").strip(),
+                交易情况指数=engine_inst.交易情况指数,
                 租期原文=str(raw_lease) if raw_lease is not None else "",
                 起始日=start,
                 日期精度=precision,

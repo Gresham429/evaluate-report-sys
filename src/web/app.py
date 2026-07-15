@@ -15,13 +15,16 @@ import sys
 import tempfile
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from starlette.background import BackgroundTask
 
 from src.attachments.collector import AttachmentPage, collect
+from src.engine.compute import compute_from_selection
 from src.extractor.project import load_project
+from src.library.importer import import_from_excel
 from src.library.store import DEFAULT_STORE_PATH, InstanceStore
 from src.model import Category, Project, Subject
 from src.renderer.render import render
@@ -155,6 +158,85 @@ def create_app() -> FastAPI:
                 }
                 for i in store.list_by_category(cat)
             ]
+        }
+
+    @app.post("/api/import")
+    async def import_instances(file: UploadFile) -> dict[str, object]:
+        """从 xlsx 抽取比较实例，供确认后经 /api/library 入库。**不落库**。"""
+        if not (file.filename or "").lower().endswith(".xlsx"):
+            raise HTTPException(status_code=400, detail="只接受 .xlsx 文件")
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+            tmp.write(await file.read())
+            path = Path(tmp.name)
+        try:
+            instances = import_from_excel(path)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        finally:
+            path.unlink(missing_ok=True)
+        return {"imported": [InstanceStore.to_dict(i) for i in instances]}
+
+    @app.post("/api/library")
+    def add_to_library(payload: dict[str, Any]) -> dict[str, object]:
+        """把确认过的实例入库。形状与 /api/import 的 `imported` 一致。
+
+        重复编号不覆盖——已在库中的原样保留，判重结果在 `skipped` 中如实报告。
+        """
+        raw = payload.get("instances")
+        if not isinstance(raw, list):
+            raise HTTPException(status_code=400, detail="instances 字段缺失或格式错误")
+        store = InstanceStore(_store_path())
+        store.load()
+        added = 0
+        skipped: list[str] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                raise HTTPException(status_code=400, detail=f"实例数据格式错误：{item!r}")
+            try:
+                inst = InstanceStore.from_dict(item)
+            except (KeyError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail=f"实例数据解析失败：{exc}") from exc
+            if store.add(inst):
+                added += 1
+            else:
+                skipped.append(inst.编号)
+        store.save()
+        return {"added": added, "skipped": skipped}
+
+    @app.post("/api/compute")
+    async def compute(file: UploadFile, selected: str = Form(...)) -> dict[str, object]:
+        """选中的库内实例接入市场比较法引擎重算。
+
+        不做推荐；市场状况指数须逐条现填，系统不推算、不给默认值——
+        缺失时 400，不得静默取默认值继续算。
+        """
+        if not (file.filename or "").lower().endswith(".xlsx"):
+            raise HTTPException(status_code=400, detail="只接受 .xlsx 文件")
+        try:
+            raw_selected = json.loads(selected)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=400, detail=f"selected 字段不是合法 JSON：{exc}"
+            ) from exc
+        if not isinstance(raw_selected, list):
+            raise HTTPException(status_code=400, detail="selected 须为数组")
+
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+            tmp.write(await file.read())
+            path = Path(tmp.name)
+        try:
+            store = InstanceStore(_store_path())
+            store.load()
+            result = compute_from_selection(path, raw_selected, store)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        finally:
+            path.unlink(missing_ok=True)
+
+        return {
+            "比准价格": list(result.比准价格),
+            "评估结果": result.评估结果,
+            "离散度": result.离散度,
         }
 
     @app.post("/api/extract")

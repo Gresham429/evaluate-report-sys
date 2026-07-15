@@ -33,13 +33,13 @@ class InstanceStore:
             logger.debug("实例库不存在，视为空库：%s", self.path)
             return
         raw = json.loads(self.path.read_text(encoding="utf-8"))
-        self._items = {r["编号"]: self._from_dict(r) for r in raw}
+        self._items = {r["编号"]: self.from_dict(r) for r in raw}
         logger.info("加载实例库 %s：%d 条", self.path, len(self._items))
 
     def save(self) -> None:
         """写回磁盘。UTF-8、缩进、不转义中文——须人类可读可手改。"""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = [self._to_dict(i) for i in self._items.values()]
+        payload = [self.to_dict(i) for i in self._items.values()]
         self.path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
         )
@@ -65,6 +65,14 @@ class InstanceStore:
         """
         return self._items.pop(编号, None) is not None
 
+    def get(self, 编号: str) -> StoredInstance | None:
+        """按编号取一条。
+
+        Returns:
+            对应实例；编号不在库中时为 None。
+        """
+        return self._items.get(编号)
+
     def list_by_category(self, category: Category) -> tuple[StoredInstance, ...]:
         """按类别列出，起始日从新到旧。
 
@@ -76,7 +84,9 @@ class InstanceStore:
         return tuple(items)
 
     @staticmethod
-    def _to_dict(inst: StoredInstance) -> dict[str, object]:
+    def to_dict(inst: StoredInstance) -> dict[str, object]:
+        """序列化为 JSON 安全的字典。供磁盘持久化，也供 /api/import、/api/library 复用，
+        保证网页接口与库文件的形状始终一致。"""
         data = asdict(inst)
         data["类别"] = inst.类别.value
         data["日期精度"] = inst.日期精度.value
@@ -84,7 +94,13 @@ class InstanceStore:
         return data
 
     @staticmethod
-    def _from_dict(data: dict[str, object]) -> StoredInstance:
+    def from_dict(data: dict[str, object]) -> StoredInstance:
+        """由 to_dict 的输出还原。
+
+        Raises:
+            KeyError: 必需字段缺失。
+            ValueError: 字段值不合法（如类别、日期精度不是已知枚举值）。
+        """
         start = data.get("起始日")
         return StoredInstance(
             编号=str(data["编号"]),
@@ -94,6 +110,7 @@ class InstanceStore:
             面积=float(data["面积"]),  # type: ignore[arg-type]
             出租用途=str(data["出租用途"]),
             交易情况=str(data["交易情况"]),
+            交易情况指数=float(data["交易情况指数"]),  # type: ignore[arg-type]
             租期原文=str(data["租期原文"]),
             起始日=date.fromisoformat(str(start)) if start else None,
             日期精度=DatePrecision(str(data["日期精度"])),
