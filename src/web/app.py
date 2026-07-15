@@ -24,6 +24,7 @@ from starlette.background import BackgroundTask
 from src.attachments.collector import AttachmentPage, collect
 from src.engine.annual import annual_value
 from src.engine.compute import compute_from_selection
+from src.engine.inputs import from_excel
 from src.extractor.project import load_project
 from src.library.importer import import_from_excel
 from src.library.store import DEFAULT_STORE_PATH, InstanceStore
@@ -229,7 +230,9 @@ def create_app() -> FastAPI:
         try:
             store = InstanceStore(_store_path())
             store.load()
-            category, result = compute_from_selection(path, raw_selected, store)
+            source = from_excel(path)
+            category = source.category
+            result = compute_from_selection(source, raw_selected, store)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         finally:

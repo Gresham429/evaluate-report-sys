@@ -1,23 +1,22 @@
 """把实例库里选中的实例接入比较法引擎——闭合"选实例 → 重算"的环。
 
-上一轮暴露的计划缺口：引擎会算（Task 3）、实例库能存能列（Task 4/5/6），
-但选完实例后没有任何代码把两者接起来。本模块是唯一的接口：给一份实勘表
-Excel（估价对象档次与基础表知识的来源）+ 库中选中的实例编号 + 估价师
-现填的市场状况指数，算出比准价格与评估结果。
+第二轮暴露的计划缺口：引擎会算（Task 3）、实例库能存能列（Task 4/5/6），
+但选完实例后没有任何代码把两者接起来。本模块是唯一的接口：给一份
+`ComparisonInput`（类别 + 基础表知识 + 估价对象档次）+ 库中选中的实例编号
++ 估价师现填的市场状况指数，算出比准价格与评估结果。
+
+输入从哪来本模块不管——Excel 也好、表单也好，见 `src.engine.inputs`。
 
 不做推荐：选哪三条、市场状况指数填多少，全部由估价师决定；本模块只管算对。
 """
 
 import logging
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 
-from src.engine.adapter import read_subject_levels
-from src.engine.knowledge import extract_knowledge
+from src.engine.inputs import ComparisonInput
 from src.engine.methods import get_method
 from src.engine.methods.base import Instance, Result
 from src.engine.spec import DEFAULT_SPEC_DIR, load_spec
-from src.extractor.survey import extract_survey
 from src.library.store import InstanceStore
 from src.model import Category
 
@@ -83,23 +82,23 @@ def _resolve_instance(
 
 
 def compute_from_selection(
-    path: Path,
+    source: ComparisonInput,
     selections: Sequence[Mapping[str, object]],
     store: InstanceStore,
-) -> tuple[Category, Result]:
+) -> Result:
     """从库里取出选中的实例，接入市场比较法引擎重算。
 
     Args:
-        path: 估价对象所在的实勘表 Excel（提供估价对象档次与基础表知识）。
+        source: 引擎输入（类别 + 基础表知识 + 估价对象档次）。Excel 路径用
+            `inputs.from_excel()` 构造，表单路径直接构造——本函数一视同仁。
         selections: 选中项，形如
             `[{"编号": str, "市场状况指数": number, "备注": str}, ...]`，须恰好 3 条。
         store: 已加载（`load()` 过）的实例库。
 
     Returns:
-        `(类别, Result)`。类别一并返回是因为**数字离了单位就是误导**——
-        农用算出 1399.26（元/亩·年）与办公算出 2.83（元/㎡·天）量级差 500 倍，
-        谁拿到这些数字谁就得同时拿到判断单位的依据，不能让调用方自己去猜、
-        或另读一遍 Excel。
+        Result（比准价格、评估结果、离散度）。**单位随 `source.category` 走**——
+        农用 1399.26（元/亩·年）与办公 2.83（元/㎡·天）量级差 500 倍，调用方
+        标单位时须取输入里的类别，不要另猜。
 
     Raises:
         ValueError: 选中数量不为 3、某项缺编号、编号不在库中、类别不符，
@@ -108,19 +107,15 @@ def compute_from_selection(
     if len(selections) != SELECTION_SIZE:
         raise ValueError(f"须选满 {SELECTION_SIZE} 条实例，实选 {len(selections)} 条")
 
-    survey = extract_survey(path)
-    category = survey["category"]
-    if not isinstance(category, Category):
-        raise ValueError(f"无法识别估价对象类别：{path}")
-
-    knowledge = extract_knowledge(path)
-    subject_levels = read_subject_levels(path, category)
+    category = source.category
     instances = tuple(_resolve_instance(item, category, store) for item in selections)
 
     spec = load_spec(DEFAULT_SPEC_DIR / SPEC_FILENAME)
     method = get_method(METHOD_NAME)
     try:
-        result = method.compute(subject_levels, instances, knowledge, spec.weights)
+        result = method.compute(
+            source.subject_levels, instances, source.knowledge, spec.weights
+        )
     except ZeroDivisionError as exc:
         # 市场状况指数填 0（或使某条比准价格算出 0）会让离散度公式除零——
         # 这不是系统故障，是估价师填了个物理上不成立的指数，同样按 400 报告。
@@ -129,4 +124,4 @@ def compute_from_selection(
         "重算完成：类别=%s 比准价格=%s 评估结果=%s 离散度=%s",
         category.value, result.比准价格, result.评估结果, result.离散度,
     )
-    return category, result
+    return result

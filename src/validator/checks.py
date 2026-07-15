@@ -5,12 +5,14 @@
 """
 
 import logging
+import re
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from src.engine.annual import annual_value
 from src.model import Project
+from src.prose.composer import area_unit
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +20,18 @@ __all__ = ["Warning", "validate", "check_dispersion", "DISPERSION_THRESHOLD"]
 
 # 比准价格离散度提示阈值。实测农用 0.01、办公 0.05、商业 0.08 均属正常。
 DISPERSION_THRESHOLD = 0.20
+
+# 面积比对容差。一览表面积实测两位小数，0.01 足够吸收浮点误差而不放过真错。
+_AREA_TOLERANCE = 0.01
+
+# 规模字段里「数字 + 单位」的写法。实测三份金样：
+#   农用「土地使用权面积50.00亩」
+#   办公「房屋建筑面积723.69平方米及其分摊的土地使用权」
+#   商业「义蓬中路477号房屋建筑面积60平方米、487号房屋建筑面积70平方米及其分摊的土地使用权」
+# 房屋类兼收「平方米」与「㎡」两种写法：报告里印「㎡」，而估价师在规模字段
+# 里手写的是「平方米」，两种都得认，否则换个写法就静默失效。
+_AREA_UNIT_PATTERN = {"亩": r"亩", "㎡": r"(?:平方米|㎡)"}
+_AREA_IN_TEXT = r"(\d+(?:\.\d+)?)\s*{unit}"
 
 _REQUIRED_FIELDS = (
     ("report_no", "报告编号"),
@@ -94,6 +108,49 @@ def _check_table(project: Project) -> list[Warning]:
     return warnings
 
 
+def _check_scale(project: Project) -> list[Warning]:
+    """规模字段写的面积，与一览表面积合计是否对得上。
+
+    **不替他填，但替他核。** 19 项基本字段全部人工填、系统不拼凑（用户明确
+    要求：「不拼凑 实地勘察去填写」——拼凑出的文字进了报告是要签字的，责任
+    不清）。但手填就会手滑，把 723.69 打成 732.69，报告里就有两个互相打架的
+    数。系统无权替他改，可以替他看一眼。
+
+    比对口径要能容下三份金样的三种写法：
+
+        农用  「土地使用权面积50.00亩」                    → [50]    单个数即合计
+        办公  「房屋建筑面积723.69平方米及其分摊…」         → [723.69] 单个数即合计
+        商业  「…477号房屋建筑面积60平方米、487号…70平方米」 → [60,70]  逐对象列，合计从没写出来
+
+    故「任一个数等于合计」或「诸数之和等于合计」都算对得上。只认前者会把
+    商业那种写法一律误报——一个总在喊狼来了的提示，比没有提示更糟。
+
+    找不到任何按该类别单位计的数时**不提示**：可能是没填，也可能是换了种
+    写法，系统没有把握就不吭声。
+    """
+    unit = area_unit(project.category)
+    pattern = _AREA_IN_TEXT.format(unit=_AREA_UNIT_PATTERN[unit])
+    found = [float(m) for m in re.findall(pattern, project.scale or "")]
+    if not found:
+        return []
+
+    total = sum(s.area for s in project.subjects)
+    if any(abs(n - total) < _AREA_TOLERANCE for n in found):
+        return []
+    if abs(sum(found) - total) < _AREA_TOLERANCE:
+        return []
+    return [
+        Warning(
+            code="SCALE_MISMATCH",
+            message=(
+                f"规模字段写的 {'、'.join(f'{n:g}' for n in found)} "
+                f"{'平方米' if unit == '㎡' else unit}，"
+                f"与一览表面积合计 {total:g} 不符，请复核。"
+            ),
+        )
+    ]
+
+
 def _check_external_refs(path: Path) -> list[Warning]:
     """检测工作簿是否引用外部文件。
 
@@ -126,12 +183,13 @@ def _check_external_refs(path: Path) -> list[Warning]:
     return []
 
 
-def validate(project: Project, path: Path) -> tuple[Warning, ...]:
+def validate(project: Project, path: Path | None = None) -> tuple[Warning, ...]:
     """校验项目数据。
 
     Args:
         project: 项目数据。
-        path: 源 xlsx 路径，用于检查外部引用。
+        path: 源 xlsx 路径，用于检查外部引用。**表单路径没有源文件，传 None
+            即跳过这一项**——其余各项与数据从哪来无关，一律照查。
 
     Returns:
         警告元组。**永不抛异常，永不阻断。**
@@ -140,6 +198,8 @@ def validate(project: Project, path: Path) -> tuple[Warning, ...]:
     warnings += _check_required(project)
     warnings += check_dispersion(project.dispersion)
     warnings += _check_table(project)
-    warnings += _check_external_refs(path)
-    logger.debug("校验 %s：%d 条提示", path.name, len(warnings))
+    warnings += _check_scale(project)
+    if path is not None:
+        warnings += _check_external_refs(path)
+    logger.debug("校验 %s：%d 条提示", path.name if path else "表单", len(warnings))
     return tuple(warnings)

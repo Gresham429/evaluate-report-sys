@@ -42,3 +42,51 @@ def test_missing_report_no_warns() -> None:
     project = replace(load_project(CASES["办公"]), report_no="")
     codes = {w.code for w in validate(project, CASES["办公"])}
     assert "MISSING_FIELD" in codes
+
+
+# ── 规模字段一致性（表单输入的「替他核」）──────────────────────────
+
+def test_scale_matches_in_all_three_goldens() -> None:
+    """三份金样三种写法，一条都不许误报。
+
+    农用/办公写合计，商业逐对象列（60、70，合计 130 从没写出来）。
+    一个总在喊狼来了的提示，比没有提示更糟。
+    """
+    for case, path in CASES.items():
+        codes = {w.code for w in validate(load_project(path), path)}
+        assert "SCALE_MISMATCH" not in codes, f"{case} 被误报"
+
+
+def test_scale_typo_is_caught() -> None:
+    """把 723.69 手滑打成 732.69——正是这条检查存在的理由。"""
+    from dataclasses import replace
+
+    project = load_project(CASES["办公"])
+    typo = replace(project, scale="房屋建筑面积732.69平方米及其分摊的土地使用权")
+    warnings = [w for w in validate(typo) if w.code == "SCALE_MISMATCH"]
+    assert len(warnings) == 1
+    assert "732.69" in warnings[0].message
+    assert "723.69" in warnings[0].message
+
+
+def test_scale_accepts_per_subject_listing() -> None:
+    """商业那种逐对象列的写法：60 + 70 = 130 对得上合计，不报。"""
+    codes = {w.code for w in validate(load_project(CASES["商业"]))}
+    assert "SCALE_MISMATCH" not in codes
+
+
+def test_scale_without_recognisable_area_stays_quiet() -> None:
+    """找不到按该类别单位计的数就不吭声——没把握就别喊。"""
+    from dataclasses import replace
+
+    project = replace(load_project(CASES["办公"]), scale="详见附件清单")
+    codes = {w.code for w in validate(project)}
+    assert "SCALE_MISMATCH" not in codes
+
+
+def test_validate_works_without_excel() -> None:
+    """表单路径没有源文件：不传 path 也要能校验，只是跳过外部引用那一项。"""
+    project = load_project(CASES["办公"])
+    codes = {w.code for w in validate(project)}
+    assert "EXTERNAL_REF" not in codes
+    assert isinstance(validate(project), tuple)
