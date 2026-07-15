@@ -71,16 +71,16 @@ DRIFT_RULES: tuple[DriftRule, ...] = (
     ),
     DriftRule(
         name="房屋安全",
-        pattern=r"估价对象的安全、环境污染",
-        replacement="估价对象的房屋安全、环境污染",
-        reason="办公与商业同为房屋类，写法应一致",
+        pattern=r"已对安全、环境污染",
+        replacement="已对房屋安全、环境污染",
+        reason="办公与商业同为房屋类，写法应一致（农用地无房屋，本无此项，不受影响）",
         weight=1,
     ),
     DriftRule(
         name="缺复印件",
-        pattern=r"《委托评估协议书》(?!复印件|、)",
-        replacement="《委托评估协议书》复印件",
-        reason="附件清单列的是复印件",
+        pattern=r"《委托评估协议书》；",
+        replacement="《委托评估协议书》复印件；",
+        reason="估价依据清单列的是复印件；商业金样此处漏写。仅匹配分号结尾，避免误伤正文的「按《委托评估协议书》为准」",
         weight=1,
     ),
     DriftRule(
