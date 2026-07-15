@@ -1,58 +1,402 @@
 <!doctype html>
 <meta charset="utf-8">
 <title>房地产估价报告生成系统</title>
+<!--
+  视觉取向：公文/档案。纸色底、发丝栏线、印章红作唯一强调色、账簿式表格、
+  等宽数字。界面像它产出的那份要签字的报告。
+
+  字体全部取本机已装字库，不引外部资源——本系统打包成内网单机 exe，
+  联外网取字体既跑不通也不该跑（数据全程留在本机）。
+-->
 <style>
-  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
-         max-width: 900px; margin: 2rem auto; padding: 0 1rem; line-height: 1.6; }
-  h1 { font-size: 1.4rem; }
-  .step { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
-  .warn { background: #fff8e1; border-left: 3px solid #f0a000; padding: .5rem .75rem; margin: .4rem 0; }
-  .err { background: #fdecea; border-left: 3px solid #d32f2f; padding: .5rem .75rem; margin: .4rem 0; }
-  .result { background: #eefaf0; border-left: 3px solid #2e9e5b; padding: .5rem .75rem; margin: .4rem 0; }
-  label { display: block; margin: .5rem 0 .2rem; font-size: .85rem; color: #555; }
-  input[type=text] { width: 100%; padding: .4rem; border: 1px solid #ccc; border-radius: 4px; }
-  table { border-collapse: collapse; width: 100%; margin-top: .5rem; }
-  th, td { border: 1px solid #ddd; padding: .4rem; font-size: .85rem; text-align: left; }
-  ul#file-list { list-style: none; padding: 0; margin: .5rem 0 0; }
-  ul#file-list li { display: flex; align-items: center; gap: .4rem; padding: .3rem 0;
-                     border-bottom: 1px solid #eee; font-size: .85rem; }
+  :root {
+    --paper:      #f7f4ee;
+    --card:       #fffdfa;
+    --ink:        #1b1815;
+    --ink-2:      #57504a;
+    --ink-3:      #8b8279;
+    --rule:       #e6e0d6;
+    --rule-2:     #cec6b8;
+    --seal:       #a8261e;
+    --seal-soft:  #f8ece9;
+    --jade:       #2f6b4f;
+    --jade-soft:  #eef5f1;
+    --amber:      #8a5a12;
+    --amber-soft: #fbf3e1;
+
+    --sans:  "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", "Source Han Sans SC", sans-serif;
+    --serif: "Songti SC", "STSong", "SimSun", "Source Han Serif SC", serif;
+    --num:   ui-monospace, "SF Mono", "Cascadia Mono", Consolas, Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0; padding: 0 1.5rem 6rem;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px; line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* 纸纹。内联 SVG，无外部请求。 */
+  body::before {
+    content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    opacity: .04; mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  .sheet { position: relative; z-index: 1; max-width: 940px; margin: 0 auto; }
+
+  /* ── 报头 ───────────────────────────────────────── */
+  .masthead { display: flex; align-items: center; gap: 1.1rem; padding: 2.6rem 0 1rem; }
+  .seal {
+    flex: none; width: 46px; height: 46px; display: grid; place-items: center;
+    border: 2px solid var(--seal); border-radius: 3px;
+    color: var(--seal); font-family: var(--serif); font-size: 1.45rem; font-weight: 700;
+    transform: rotate(-4deg); opacity: .9;
+  }
+  .masthead h1 {
+    margin: 0; font-family: var(--serif); font-size: 1.7rem; font-weight: 700;
+    letter-spacing: .06em;
+  }
+  .masthead .sub { margin: .1rem 0 0; color: var(--ink-3); font-size: .78rem; letter-spacing: .04em; }
+  .masthead-id { margin-left: auto; text-align: right; }
+  /* 公文头的双线：一粗一细 */
+  .rule-double { border-top: 2px solid var(--ink); margin-bottom: 2px; }
+  .rule-double + .rule-thin { border-top: 1px solid var(--ink); }
+
+  .chip {
+    display: inline-block; padding: .1rem .5rem; border: 1px solid var(--rule-2);
+    border-radius: 2px; background: var(--card);
+    font-size: .74rem; letter-spacing: .06em; color: var(--ink-2);
+  }
+  .chip-seal { border-color: var(--seal); color: var(--seal); background: var(--seal-soft); }
+  .chip-no { font-family: var(--num); font-size: .8rem; color: var(--ink); }
+
+  /* ── 步骤 ───────────────────────────────────────── */
+  .step {
+    position: relative; display: grid; grid-template-columns: 3.2rem 1fr;
+    gap: 1rem; padding: 1.5rem 0 1.6rem;
+    border-bottom: 1px solid var(--rule);
+  }
+  .step[hidden] { display: none; }
+  .step-no {
+    font-family: var(--serif); font-size: 1.3rem; color: var(--ink-3);
+    text-align: center; line-height: 1.5;
+    border-right: 1px solid var(--rule); user-select: none;
+  }
+  .step.on .step-no { color: var(--seal); }
+  .step h2 {
+    margin: 0 0 .1rem; font-size: 1rem; font-weight: 600; letter-spacing: .04em;
+    display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap;
+  }
+  .step h2 .sub { font-weight: 400; font-size: .78rem; color: var(--ink-3); letter-spacing: 0; }
+  .hint { color: var(--ink-3); font-size: .78rem; margin: .45rem 0 0; }
+
+  /* 页面载入时逐级显影 */
+  .step { animation: rise .5s cubic-bezier(.2,.7,.3,1) both; }
+  .step:nth-child(2) { animation-delay: .04s }
+  .step:nth-child(3) { animation-delay: .08s }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px) } }
+
+  /* ── 控件 ───────────────────────────────────────── */
+  /* 原生 file 控件的按钮文字（Choose File / No file chosen）由浏览器给，
+     改不了措辞，在全中文界面里格外扎眼。故藏起真控件，用 label 代之——
+     label 点击会转发给它包住的 input，功能一模一样。 */
+  .filebtn {
+    display: inline-block; font-size: .85rem; padding: .42rem 1.1rem; cursor: pointer;
+    border: 1px solid var(--rule-2); border-radius: 2px;
+    background: var(--card); color: var(--ink);
+    transition: border-color .15s, color .15s;
+  }
+  .filebtn:hover { border-color: var(--seal); color: var(--seal); }
+
+  input[type=text] {
+    width: 100%; padding: .38rem .5rem; font: inherit; font-size: .85rem;
+    color: var(--ink); background: var(--card);
+    border: 1px solid var(--rule-2); border-radius: 2px;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  input[type=text]:focus {
+    outline: none; border-color: var(--seal);
+    box-shadow: 0 0 0 2px var(--seal-soft);
+  }
+  input[type=text]::placeholder { color: #b8b0a6; }
+  input[type=checkbox] { accent-color: var(--seal); width: 15px; height: 15px; }
+
+  button {
+    font: inherit; font-size: .85rem; padding: .42rem 1.1rem; cursor: pointer;
+    border: 1px solid var(--rule-2); border-radius: 2px;
+    background: var(--card); color: var(--ink);
+    transition: border-color .15s, color .15s, background .15s;
+  }
+  button:hover:not(:disabled) { border-color: var(--seal); color: var(--seal); }
+  button:disabled { cursor: not-allowed; opacity: .4; }
+  button.primary {
+    background: var(--seal); border-color: var(--seal); color: #fff; letter-spacing: .08em;
+  }
+  button.primary:hover:not(:disabled) { background: #8e1f18; border-color: #8e1f18; color: #fff; }
+  button.mini { padding: .1rem .45rem; font-size: .75rem; line-height: 1.4; }
+
+  /* ── 字段表单 ───────────────────────────────────── */
+  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: .7rem 1.1rem; margin-top: .8rem; }
+  .fields label { display: block; font-size: .72rem; color: var(--ink-3); letter-spacing: .05em; margin-bottom: .18rem; }
+
+  /* ── 账簿式表格 ─────────────────────────────────── */
+  table { border-collapse: collapse; width: 100%; margin-top: .9rem; }
+  thead th {
+    font-size: .7rem; font-weight: 600; letter-spacing: .08em; color: var(--ink-3);
+    text-align: left; padding: 0 .5rem .4rem; border-bottom: 1px solid var(--rule-2);
+    white-space: nowrap;
+  }
+  tbody td {
+    padding: .5rem; font-size: .85rem; border-bottom: 1px solid var(--rule);
+    vertical-align: middle;
+  }
+  tfoot td {
+    padding: .5rem; font-size: .8rem; border-top: 1px solid var(--rule-2);
+    color: var(--ink-2); font-weight: 600;
+  }
+  .num { font-family: var(--num); font-variant-numeric: tabular-nums; text-align: right; }
+  th.num { text-align: right; }
+  td.idx { color: var(--ink-3); font-family: var(--num); width: 2rem; }
+  .price-cell input { text-align: right; font-family: var(--num); font-variant-numeric: tabular-nums; padding: .25rem .4rem; }
+  .price-cell { width: 8.5rem; }
+
+  /* ── 提示条 ─────────────────────────────────────── */
+  .note, .warn, .err, .result {
+    padding: .55rem .8rem; margin: .5rem 0; font-size: .82rem; border-left: 2px solid;
+  }
+  .note   { background: var(--card);      border-color: var(--rule-2); color: var(--ink-2); }
+  .warn   { background: var(--amber-soft); border-color: var(--amber);  color: var(--amber); }
+  .err    { background: var(--seal-soft);  border-color: var(--seal);   color: var(--seal); }
+  .result { background: var(--jade-soft);  border-color: var(--jade);   color: var(--ink); }
+
+  /* ── 实例条目 ───────────────────────────────────── */
+  .instRow {
+    padding: .7rem .8rem; margin-bottom: .4rem; background: var(--card);
+    border: 1px solid var(--rule); border-radius: 2px;
+    transition: border-color .15s, background .15s;
+  }
+  .instRow:hover { border-color: var(--rule-2); }
+  .instRow.picked { border-color: var(--seal); background: var(--seal-soft); }
+  .instHead { display: flex; gap: .6rem; align-items: baseline; cursor: pointer; }
+  .instTitle { font-weight: 600; font-size: .88rem; }
+  .instMeta { color: var(--ink-3); font-size: .76rem; margin-top: .1rem; }
+  .instMeta .price { font-family: var(--num); color: var(--ink-2); }
+  .flag { color: var(--amber); }
+  .instForm {
+    display: none; gap: .8rem; align-items: center; flex-wrap: wrap;
+    margin: .6rem 0 0 1.6rem; padding-top: .55rem; border-top: 1px dashed var(--rule-2);
+  }
+  .instRow.picked .instForm { display: flex; }
+  .instForm label { font-size: .74rem; color: var(--ink-3); letter-spacing: .04em; }
+  .instForm input { width: 5.5rem; font-family: var(--num); text-align: right; }
+  .instForm input.wide { width: 15rem; font-family: var(--sans); text-align: left; }
+
+  /* ── 结果 ───────────────────────────────────────── */
+  .figures { display: flex; gap: 2.2rem; flex-wrap: wrap; align-items: flex-end; }
+  .figure .k { font-size: .7rem; letter-spacing: .1em; color: var(--ink-3); }
+  .figure .v {
+    font-family: var(--num); font-variant-numeric: tabular-nums;
+    font-size: 1.7rem; line-height: 1.25; color: var(--jade); font-weight: 600;
+  }
+  .figure .u { font-family: var(--sans); font-size: .74rem; color: var(--ink-3); margin-left: .3rem; font-weight: 400; }
+  .figure.minor .v { font-size: 1.05rem; color: var(--ink-2); font-weight: 500; }
+
+  /* ── 附件列表 ───────────────────────────────────── */
+  ul#file-list { list-style: none; padding: 0; margin: .7rem 0 0; }
+  ul#file-list li {
+    display: flex; align-items: center; gap: .4rem; padding: .38rem .5rem;
+    border-bottom: 1px solid var(--rule); font-size: .82rem;
+  }
   ul#file-list li span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  button { cursor: pointer; }
-  button:disabled { cursor: not-allowed; opacity: .5; }
-  .hint { color: #777; font-size: .8rem; }
+  ul#file-list li .ord { flex: none; font-family: var(--num); color: var(--ink-3); }
+
+  .actions { display: flex; align-items: center; gap: .8rem; margin-top: .9rem; flex-wrap: wrap; }
+  .status { font-size: .8rem; color: var(--ink-3); }
+  .status.done { color: var(--jade); }
 </style>
-<h1>房地产估价报告生成系统</h1>
-<div class="step">
-  <strong>① 选择 Excel</strong>
-  <input type="file" id="xlsx" accept=".xlsx">
+
+<div class="sheet">
+  <header class="masthead">
+    <div class="seal">评</div>
+    <div>
+      <h1>房地产估价报告生成系统</h1>
+      <p class="sub">单机运行 · 不联外网 · 数据全程留在本机</p>
+    </div>
+    <div class="masthead-id" id="masthead-id"></div>
+  </header>
+  <div class="rule-double"></div>
+  <div class="rule-thin"></div>
+
+  <main>
+    <section class="step on" id="step-xlsx">
+      <div class="step-no">壹</div>
+      <div class="step-body">
+        <h2>选择 Excel <span class="sub">实勘表、比较法（.xlsx）</span></h2>
+        <div class="actions">
+          <label class="filebtn">选择文件<input type="file" id="xlsx" accept=".xlsx" hidden></label>
+          <span class="status" id="xlsx-status">尚未选择</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="step" id="review" hidden>
+      <div class="step-no">贰</div>
+      <div class="step-body">
+        <h2>复核数据 <span class="sub">改动只影响本次生成，不回写 Excel</span></h2>
+        <div id="warnings"></div>
+        <div class="fields" id="fields"></div>
+        <table id="subjects"></table>
+        <div class="note" id="priceSource"></div>
+      </div>
+    </section>
+
+    <section class="step" id="instances" hidden>
+      <div class="step-no">叁</div>
+      <div class="step-body">
+        <h2>选择可比实例 <span class="sub" id="instHint"></span></h2>
+        <div class="note">
+          按租期起始日从新到旧排列。系统不做可比性推荐——哪条更可比，由你的专业判断决定。<br>
+          市场状况指数须逐条填写，系统不推算、不给默认值。
+        </div>
+        <div id="instList"></div>
+        <div class="actions">
+          <button id="computeBtn" type="button" disabled>重算评估结果</button>
+          <span class="status" id="computeStatus"></span>
+        </div>
+        <div class="err" id="computeError" hidden></div>
+        <div class="result" id="computeResult" hidden></div>
+      </div>
+    </section>
+
+    <section class="step" id="attachments" hidden>
+      <div class="step-no">肆</div>
+      <div class="step-body">
+        <h2>挑附件、排序 <span class="sub">可不选，直接跳过</span></h2>
+        <div class="actions">
+          <label class="filebtn">添加附件<input type="file" id="attach-input" multiple hidden
+                 accept=".pdf,.jpg,.jpeg,.png,.bmp,.gif,.tif,.tiff"></label>
+          <span class="status">顺序即报告中出现的顺序，用「↑」「↓」调整</span>
+        </div>
+        <ul id="file-list"></ul>
+      </div>
+    </section>
+
+    <section class="step" id="generate-step" hidden>
+      <div class="step-no">伍</div>
+      <div class="step-body">
+        <h2>生成下载</h2>
+        <div class="actions">
+          <button id="generate" class="primary" disabled>生成报告</button>
+          <span class="status" id="generate-status"></span>
+        </div>
+      </div>
+    </section>
+  </main>
 </div>
-<div class="step" id="review" hidden>
-  <strong>② 复核数据</strong>
-  <div id="warnings"></div>
-  <div id="fields"></div>
-  <table id="subjects"></table>
-  <p class="hint">表格数值不重算、不可在此修改；若与 Excel 不符，请回 Excel 改好、保存后重新导入。</p>
-</div>
-<div class="step" id="instances" hidden>
-  <strong>③ 选择可比实例</strong> <span id="instHint"></span>
-  <div id="instList"></div>
-  <div class="warn" style="background:#eef4ff;border-left-color:#4a7dd0">
-    ⓘ 按租期起始日从新到旧排列。系统不做可比性推荐——哪条更可比，由你的专业判断决定。<br>
-    市场状况指数须逐条填写，系统不推算、不给默认值。
-  </div>
-  <div style="margin-top:.75rem">
-    <button id="computeBtn" type="button" disabled>重算评估结果</button>
-    <span class="hint" id="computeStatus"></span>
-  </div>
-  <div class="err" id="computeError" hidden></div>
-  <div class="result" id="computeResult" hidden></div>
-</div>
+
 <script>
+let currentProject = null;      // 唯一的项目状态，/api/render 提交的就是它
+let currentXlsxFile = null;     // ①选好的 xlsx，/api/compute 需重传（读估价对象档次）
+let attachmentFiles = [];
+let priceUnit = '';             // 单位一律由后端给，前端不自己判断农用/房屋
+let areaUnit = '';
 let currentInstanceCategory = '';
 let currentInstanceTotal = 0;
-let currentXlsxFile = null; // ①选好的 xlsx 原始 File 对象，/api/compute 需要重传
 
-/** 从实例选择区的真实 DOM 读取当前值——不是快照，每次调用都取最新填写。 */
+const $ = (id) => document.getElementById(id);
+
+/** 把步骤标为「当前」，只影响序号颜色。 */
+function markStep(id) {
+  document.querySelectorAll('.step').forEach((s) => s.classList.toggle('on', s.id === id));
+}
+
+// ── 一览表 ────────────────────────────────────────────────
+
+/** 一览表的单价从哪来——Excel 原值 / 重算值 / 人工改过。三种状态必须分得清。 */
+let priceOrigin = 'excel';
+
+function describePriceSource() {
+  const text = {
+    excel: `单价与年租赁价值取自 Excel 一览表，未经系统重算。`,
+    computed: `单价已用第叁步的重算结果更新。`,
+    manual: `单价经人工调整。`,
+  }[priceOrigin];
+  $('priceSource').innerHTML =
+    `${text}<br>单价可直接改（金样里农用把 1399.26 取整成 1400 才写进报告——取整与否是你的判断），` +
+    `改完年租赁价值自动跟算。`;
+}
+
+function renderSubjects() {
+  if (!currentProject) return;
+  const rows = currentProject.subjects.map((s, i) => `
+    <tr>
+      <td class="idx">${s.index}</td>
+      <td>${s.address}</td>
+      <td class="num">${s.area.toLocaleString()}</td>
+      <td class="price-cell">
+        <input type="text" class="priceInput" data-row="${i}" value="${s.unit_price}">
+      </td>
+      <td class="num" data-annual="${i}">${s.annual_value.toLocaleString()}</td>
+    </tr>`).join('');
+  const totalArea = currentProject.subjects.reduce((sum, s) => sum + s.area, 0);
+  const totalValue = currentProject.subjects.reduce((sum, s) => sum + s.annual_value, 0);
+  $('subjects').innerHTML = `
+    <thead><tr>
+      <th>序号</th><th>坐落</th>
+      <th class="num">面积（${areaUnit}）</th>
+      <th class="num">单价（${priceUnit}）</th>
+      <th class="num">年租赁价值（元）</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+    <tfoot><tr>
+      <td></td><td>合计</td>
+      <td class="num">${totalArea.toLocaleString()}</td><td></td>
+      <td class="num">${totalValue.toLocaleString()}</td>
+    </tr></tfoot>`;
+  describePriceSource();
+}
+
+/**
+ * 单价变了 → 问后端要年租赁价值。
+ *
+ * 公式（农用 面积×单价、房屋类 ROUND(面积×单价×365,0)）只在 Python 里实现
+ * 一次；这里照抄一份到 JS 就是第二个实现，迟早两边算出两个数。宁可多一次
+ * 本机请求。
+ */
+async function refreshAnnualValues() {
+  if (!currentProject) return;
+  const response = await fetch('/api/annual-values', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      category: currentProject.category,
+      subjects: currentProject.subjects.map((s) => ({ area: s.area, unit_price: s.unit_price })),
+    }),
+  });
+  if (!response.ok) return;
+  const { annual_values } = await response.json();
+  annual_values.forEach((v, i) => { currentProject.subjects[i].annual_value = v; });
+  renderSubjects();
+}
+
+$('subjects').addEventListener('change', async (event) => {
+  const input = event.target;
+  if (!input.classList || !input.classList.contains('priceInput')) return;
+  const value = Number(input.value);
+  if (!Number.isFinite(value)) { renderSubjects(); return; }
+  currentProject.subjects[Number(input.dataset.row)].unit_price = value;
+  priceOrigin = 'manual';
+  await refreshAnnualValues();
+});
+
+// ── 实例与重算 ────────────────────────────────────────────
+
+/** 从实例区的真实 DOM 读当前值——不是快照，每次调用都取最新填写。 */
 function collectSelectedInstances() {
   return Array.from(document.querySelectorAll('#instList .instRow')).flatMap((row) => {
     const pick = row.querySelector('.instPick');
@@ -70,38 +414,51 @@ function collectSelectedInstances() {
 function updateInstHint() {
   const selected = collectSelectedInstances();
   const filled = selected.filter((s) => s.市场状况指数 !== '').length;
-  document.getElementById('instHint').textContent =
-    `（${currentInstanceCategory}类，共 ${currentInstanceTotal} 条 · 已选 ${selected.length}/3 条` +
-    (selected.length ? `，已填市场状况指数 ${filled}/${selected.length}` : '') + `）`;
+  $('instHint').textContent =
+    `${currentInstanceCategory}类，共 ${currentInstanceTotal} 条 · 已选 ${selected.length}/3` +
+    (selected.length ? ` · 已填指数 ${filled}/${selected.length}` : '');
+  document.querySelectorAll('#instList .instRow').forEach((row) => {
+    const pick = row.querySelector('.instPick');
+    row.classList.toggle('picked', pick instanceof HTMLInputElement && pick.checked);
+  });
   // 选择或填写变了，之前算出的结果已经过期——隐藏掉，逼用户重新点「重算」。
-  document.getElementById('computeError').hidden = true;
-  document.getElementById('computeResult').hidden = true;
+  $('computeError').hidden = true;
+  $('computeResult').hidden = true;
 }
 
-/** 收集当前①选好的 xlsx + ③勾选的实例，调 /api/compute 重算并显示结果。 */
+/** 把重算结果写进一览表与 currentProject——报告用的就是这份数据。 */
+async function applyComputed(result) {
+  currentProject.unit_price = result.评估结果;
+  currentProject.dispersion = result.离散度;
+  currentProject.subjects.forEach((s) => { s.unit_price = result.评估结果; });
+  priceOrigin = 'computed';
+  await refreshAnnualValues();
+  $('applyStatus').textContent = '已写入一览表，第伍步生成的报告即用此数。';
+  $('applyStatus').className = 'status done';
+  markStep('review');
+  $('review').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
 async function recomputeResult() {
-  const btn = document.getElementById('computeBtn');
-  const statusEl = document.getElementById('computeStatus');
-  const errorEl = document.getElementById('computeError');
-  const resultEl = document.getElementById('computeResult');
+  const btn = $('computeBtn');
+  const errorEl = $('computeError');
+  const resultEl = $('computeResult');
   errorEl.hidden = true;
   errorEl.textContent = '';
   resultEl.hidden = true;
   resultEl.innerHTML = '';
 
   if (!currentXlsxFile) {
-    errorEl.textContent = '请先在①选择 Excel 文件。';
+    errorEl.textContent = '请先在第壹步选择 Excel 文件。';
     errorEl.hidden = false;
     return;
   }
-  const selected = collectSelectedInstances();
-
   btn.disabled = true;
-  statusEl.textContent = '计算中……';
+  $('computeStatus').textContent = '计算中……';
   try {
     const form = new FormData();
     form.append('file', currentXlsxFile);
-    form.append('selected', JSON.stringify(selected));
+    form.append('selected', JSON.stringify(collectSelectedInstances()));
     const response = await fetch('/api/compute', { method: 'POST', body: form });
     const body = await response.json();
     if (!response.ok) {
@@ -111,17 +468,35 @@ async function recomputeResult() {
       errorEl.hidden = false;
       return;
     }
-    resultEl.innerHTML =
-      `<strong>比准价格</strong>：${body.比准价格.join(' / ')}<br>` +
-      `<strong>评估结果</strong>：${body.评估结果}<br>` +
-      `<strong>离散度</strong>：${body.离散度}`;
+    const unit = body.单价单位;
+    resultEl.innerHTML = `
+      <div class="figures">
+        <div class="figure">
+          <div class="k">评估结果</div>
+          <div class="v">${body.评估结果}<span class="u">${unit}</span></div>
+        </div>
+        <div class="figure minor">
+          <div class="k">比准价格</div>
+          <div class="v">${body.比准价格.join(' / ')}<span class="u">${unit}</span></div>
+        </div>
+        <div class="figure minor">
+          <div class="k">离散度</div>
+          <div class="v">${body.离散度}</div>
+        </div>
+      </div>
+      ${(body.提示 || []).map(w => `<div class="warn">${w.message}</div>`).join('')}
+      <div class="actions">
+        <button id="applyBtn" type="button" class="primary">用此结果更新一览表</button>
+        <span class="status" id="applyStatus"></span>
+      </div>`;
     resultEl.hidden = false;
+    $('applyBtn').addEventListener('click', () => applyComputed(body));
   } catch (err) {
     errorEl.textContent = '请求失败：' + err;
     errorEl.hidden = false;
   } finally {
     btn.disabled = false;
-    statusEl.textContent = '';
+    $('computeStatus').textContent = '';
   }
 }
 
@@ -131,61 +506,51 @@ async function loadInstances(category) {
   const { instances } = await r.json();
   currentInstanceCategory = category;
   currentInstanceTotal = instances.length;
-  document.getElementById('instances').hidden = false;
-  document.getElementById('computeBtn').disabled = false;
-  document.getElementById('computeError').hidden = true;
-  document.getElementById('computeResult').hidden = true;
-  document.getElementById('instList').innerHTML = instances.map(i => `
-    <div class="instRow" style="border-bottom:1px solid #eee;padding:.5rem 0">
-      <label style="display:flex;gap:.5rem;align-items:baseline">
+  $('instances').hidden = false;
+  $('computeBtn').disabled = false;
+  $('computeError').hidden = true;
+  $('computeResult').hidden = true;
+  $('instList').innerHTML = instances.map(i => `
+    <div class="instRow">
+      <label class="instHead">
         <input type="checkbox" class="instPick" value="${i.编号}">
-        <span><strong>${i.编号}</strong> — ${i.成交价} 元
-          <br><small style="color:#666">租期 ${i.租期原文}
-          ${i.日期精度 !== '完整' ? '<span style="color:#c60">⚠ 日期' + i.日期精度 + '</span>' : ''}</small>
+        <span>
+          <span class="instTitle">${i.位置}</span>
+          <div class="instMeta">
+            <!-- 成交价与评估结果同单位（引擎正是拿它乘各项指数算出比准价格的）。
+                 光写「2.52 元」是缺口①同一个病：农用的 1410 与办公的 2.52 差 500 倍。 -->
+            成交价 <span class="price">${i.成交价.toLocaleString()}</span> ${priceUnit} ·
+            租期 ${i.租期原文}
+            ${i.日期精度 !== '完整' ? `<span class="flag">⚠ 日期${i.日期精度}</span>` : ''}
+          </div>
         </span>
       </label>
-      <div style="margin-left:1.5rem;margin-top:.3rem">
-        市场状况指数 <input type="text" size="6" class="mktIdx" data-id="${i.编号}" placeholder="必填">
-        判断依据 <input type="text" size="20" class="mktNote" data-id="${i.编号}" placeholder="选填">
+      <div class="instForm">
+        <label>市场状况指数 <input type="text" class="mktIdx" placeholder="必填"></label>
+        <label>判断依据 <input type="text" class="mktNote wide" placeholder="选填"></label>
       </div>
     </div>`).join('');
   updateInstHint();
 }
 
-document.getElementById('instList').addEventListener('input', updateInstHint);
-document.getElementById('instList').addEventListener('change', updateInstHint);
-document.getElementById('computeBtn').addEventListener('click', recomputeResult);
-</script>
-<div class="step" id="attachments" hidden>
-  <strong>④ 挑附件、排序</strong>
-  <input type="file" id="attach-input" multiple
-         accept=".pdf,.jpg,.jpeg,.png,.bmp,.gif,.tif,.tiff">
-  <p class="hint">可不选，直接跳过；顺序即报告中出现的顺序，用「↑」「↓」调整。</p>
-  <ul id="file-list"></ul>
-</div>
-<div class="step" id="generate-step" hidden>
-  <strong>⑤ 生成下载</strong>
-  <div>
-    <button id="generate" disabled>生成报告</button>
-  </div>
-  <p class="hint" id="generate-status"></p>
-</div>
-<script>
-let currentProject = null;
-let attachmentFiles = [];
+$('instList').addEventListener('input', updateInstHint);
+$('instList').addEventListener('change', updateInstHint);
+$('computeBtn').addEventListener('click', recomputeResult);
+
+// ── 附件 ──────────────────────────────────────────────────
 
 function renderFileList() {
-  const list = document.getElementById('file-list');
-  list.innerHTML = attachmentFiles.map((f, i) => `
+  $('file-list').innerHTML = attachmentFiles.map((f, i) => `
     <li>
-      <span>${i + 1}. ${f.name}</span>
-      <button type="button" data-action="up" data-index="${i}" ${i === 0 ? 'disabled' : ''}>↑</button>
-      <button type="button" data-action="down" data-index="${i}" ${i === attachmentFiles.length - 1 ? 'disabled' : ''}>↓</button>
-      <button type="button" data-action="remove" data-index="${i}">×</button>
+      <span class="ord">${i + 1}</span>
+      <span>${f.name}</span>
+      <button type="button" class="mini" data-action="up" data-index="${i}" ${i === 0 ? 'disabled' : ''}>↑</button>
+      <button type="button" class="mini" data-action="down" data-index="${i}" ${i === attachmentFiles.length - 1 ? 'disabled' : ''}>↓</button>
+      <button type="button" class="mini" data-action="remove" data-index="${i}">×</button>
     </li>`).join('');
 }
 
-document.getElementById('file-list').addEventListener('click', (event) => {
+$('file-list').addEventListener('click', (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement) || !target.dataset.action) return;
   const index = Number(target.dataset.index);
@@ -199,51 +564,71 @@ document.getElementById('file-list').addEventListener('click', (event) => {
   renderFileList();
 });
 
-document.getElementById('attach-input').addEventListener('change', (event) => {
-  const input = event.target;
-  attachmentFiles = attachmentFiles.concat(Array.from(input.files));
-  input.value = '';
+$('attach-input').addEventListener('change', (event) => {
+  attachmentFiles = attachmentFiles.concat(Array.from(event.target.files));
+  event.target.value = '';
   renderFileList();
 });
 
-document.getElementById('xlsx').addEventListener('change', async (event) => {
+// ── ① 选 Excel ────────────────────────────────────────────
+
+// 类别由实勘表 A1 标题自动识别，不给改：它决定用哪份模板、列哪类实例，
+// 手改一个字（哪怕多个空格）就会在生成时炸掉，且不会重新拉实例列表。
+const FIELD_LABELS = {
+  report_no: '报告编号', client: '委托人', owner: '权利人',
+  address: '坐落', usage: '设定出租用途', value_date: '价值时点',
+};
+
+$('xlsx').addEventListener('change', async (event) => {
   const file = event.target.files[0];
   if (!file) return;
+  $('xlsx-status').textContent = '读取中……';
   const form = new FormData();
   form.append('file', file);
   const response = await fetch('/api/extract', { method: 'POST', body: form });
-  if (!response.ok) { alert((await response.json()).detail); return; }
-  const { project, warnings } = await response.json();
-  currentProject = project;
-  currentXlsxFile = file; // /api/compute 要重传同一份 xlsx（读估价对象档次），留住 File 对象
-  document.getElementById('review').hidden = false;
-  document.getElementById('attachments').hidden = false;
-  document.getElementById('generate-step').hidden = false;
-  loadInstances(project.category);
-  document.getElementById('generate').disabled = false;
-  document.getElementById('generate-status').textContent = '';
-  document.getElementById('warnings').innerHTML =
-    warnings.map(w => `<div class="warn">${w.message}</div>`).join('');
-  const keys = ['category', 'report_no', 'client', 'owner', 'address', 'usage', 'value_date'];
-  document.getElementById('fields').innerHTML = keys.map(k =>
-    `<label>${k}</label><input type="text" data-field="${k}" value="${project[k] ?? ''}">`).join('');
+  if (!response.ok) {
+    $('xlsx-status').textContent = '读取失败：' + (await response.json()).detail;
+    $('xlsx-status').className = 'status';
+    return;
+  }
+  const body = await response.json();
+  currentProject = body.project;
+  currentXlsxFile = file;
+  priceUnit = body.单价单位;
+  areaUnit = body.面积单位;
+  priceOrigin = 'excel';
+
+  $('xlsx-status').textContent = file.name;
+  $('xlsx-status').className = 'status done';
+  $('masthead-id').innerHTML =
+    `<span class="chip chip-seal">${currentProject.category}类</span>
+     <span class="chip chip-no">${currentProject.report_no}</span>`;
+
+  ['review', 'attachments', 'generate-step'].forEach((id) => { $(id).hidden = false; });
+  $('generate').disabled = false;
+  $('generate-status').textContent = '';
+  $('generate-status').className = 'status';
+  $('warnings').innerHTML = body.warnings.map(w => `<div class="warn">${w.message}</div>`).join('');
+
+  $('fields').innerHTML = Object.entries(FIELD_LABELS).map(([k, label]) =>
+    `<div><label>${label}</label><input type="text" data-field="${k}" value="${currentProject[k] ?? ''}"></div>`).join('');
   document.querySelectorAll('#fields input[data-field]').forEach((input) => {
-    input.addEventListener('input', () => {
-      currentProject[input.dataset.field] = input.value;
-    });
+    input.addEventListener('input', () => { currentProject[input.dataset.field] = input.value; });
   });
-  const rows = project.subjects.map(s =>
-    `<tr><td>${s.index}</td><td>${s.address}</td><td>${s.area}</td>
-     <td>${s.unit_price}</td><td>${s.annual_value.toLocaleString()}</td></tr>`).join('');
-  document.getElementById('subjects').innerHTML =
-    `<tr><th>序号</th><th>地址</th><th>面积</th><th>单价</th><th>年租赁价值</th></tr>${rows}`;
+
+  renderSubjects();
+  loadInstances(currentProject.category);
+  markStep('review');
 });
 
-document.getElementById('generate').addEventListener('click', async () => {
+// ── ⑤ 生成 ────────────────────────────────────────────────
+
+$('generate').addEventListener('click', async () => {
   if (!currentProject) return;
-  const button = document.getElementById('generate');
-  const status = document.getElementById('generate-status');
+  const button = $('generate');
+  const status = $('generate-status');
   button.disabled = true;
+  status.className = 'status';
   status.textContent = '生成中……';
   const form = new FormData();
   form.append('project', JSON.stringify(currentProject));
@@ -251,13 +636,15 @@ document.getElementById('generate').addEventListener('click', async () => {
   try {
     const response = await fetch('/api/render', { method: 'POST', body: form });
     if (!response.ok) {
-      const body = await response.json();
-      status.textContent = '生成失败：' + body.detail;
+      status.textContent = '生成失败：' + (await response.json()).detail;
       return;
     }
     const blob = await response.blob();
     const disposition = response.headers.get('Content-Disposition') || '';
-    const match = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/);
+    // 末尾的 i 不可省：Starlette 发的是小写 filename*=utf-8''…，
+    // 区分大小写的话 "utf-8''" 会被当成文件名的一部分，存出来的报告叫
+    // 「utf-8''正恒评报字[2026]第F071号.docx」。
+    const match = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
     const filename = match ? decodeURIComponent(match[1]) : '估价报告.docx';
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -266,6 +653,7 @@ document.getElementById('generate').addEventListener('click', async () => {
     link.click();
     URL.revokeObjectURL(url);
     status.textContent = '已下载：' + filename;
+    status.className = 'status done';
   } finally {
     button.disabled = false;
   }

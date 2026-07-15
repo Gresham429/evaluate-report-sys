@@ -9,11 +9,12 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.engine.annual import annual_value
 from src.model import Project
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Warning", "validate", "DISPERSION_THRESHOLD"]
+__all__ = ["Warning", "validate", "check_dispersion", "DISPERSION_THRESHOLD"]
 
 # 比准价格离散度提示阈值。实测农用 0.01、办公 0.05、商业 0.08 均属正常。
 DISPERSION_THRESHOLD = 0.20
@@ -35,18 +36,30 @@ class Warning:
     message: str
 
 
-def _check_dispersion(project: Project) -> list[Warning]:
-    if project.dispersion > DISPERSION_THRESHOLD:
-        return [
+def check_dispersion(dispersion: float) -> tuple[Warning, ...]:
+    """离散度是否偏高。
+
+    取值可能来自 Excel（读进来时校验），也可能来自换实例后的重算——重算出的
+    离散度同样要过这一关，否则「选了三条不可比的实例」这件事在最该被看见的
+    时刻（选实例时）反而没人提。故本函数按数值收参，不绑 Project。
+
+    Args:
+        dispersion: 比准价格离散度。
+
+    Returns:
+        提示元组，正常时为空。
+    """
+    if dispersion > DISPERSION_THRESHOLD:
+        return (
             Warning(
                 code="DISPERSION_HIGH",
                 message=(
-                    f"比准价格离散度 {project.dispersion:.0%} 超过 "
+                    f"比准价格离散度 {dispersion:.0%} 超过 "
                     f"{DISPERSION_THRESHOLD:.0%}，建议复核可比实例的选取。"
                 ),
-            )
-        ]
-    return []
+            ),
+        )
+    return ()
 
 
 def _check_required(project: Project) -> list[Warning]:
@@ -58,16 +71,15 @@ def _check_required(project: Project) -> list[Warning]:
 
 
 def _check_table(project: Project) -> list[Warning]:
-    """一览表自洽性：农用 L=K*J；房屋类 L=round(J*K*365)。
+    """一览表自洽性：年租赁价值须与单价×面积对得上。
 
-    系统不重算数值（C1），此处仅比对，不修正。
+    公式取自 `src.engine.annual`——与界面改单价后的重算共用同一份实现，
+    免得校验器与重算各算各的。此处仅比对，不修正：是否为问题、怎么改，
+    由估价师判断。
     """
     warnings: list[Warning] = []
     for subject in project.subjects:
-        if project.is_land:
-            expected = subject.unit_price * subject.area
-        else:
-            expected = round(subject.area * subject.unit_price * 365)
+        expected = annual_value(project.category, subject.area, subject.unit_price)
         if abs(expected - subject.annual_value) > 1:
             warnings.append(
                 Warning(
@@ -126,7 +138,7 @@ def validate(project: Project, path: Path) -> tuple[Warning, ...]:
     """
     warnings: list[Warning] = []
     warnings += _check_required(project)
-    warnings += _check_dispersion(project)
+    warnings += check_dispersion(project.dispersion)
     warnings += _check_table(project)
     warnings += _check_external_refs(path)
     logger.debug("校验 %s：%d 条提示", path.name, len(warnings))

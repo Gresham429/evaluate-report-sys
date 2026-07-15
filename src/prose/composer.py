@@ -11,13 +11,28 @@ from typing import Any
 
 import yaml
 
-from src.model import Project
+from src.model import Category, Project
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["load_copy", "compose", "needs_surveyor_credit"]
+__all__ = ["load_copy", "compose", "needs_surveyor_credit", "price_unit", "area_unit"]
 
 _DEFAULT_COPY = Path(__file__).with_name("copy.yaml")
+
+
+def price_unit(category: Category) -> str:
+    """单价单位。
+
+    农用按亩·年计租，房屋类按㎡·天计租（实测三份金样一览表的 K 列表头）。
+    两者量级差约 500 倍（农用 1399.26 与办公 2.83），显示时漏了单位或标错
+    单位即误导，故凡出现单价处必须带上它。
+    """
+    return "元/亩·年" if category is Category.AGRICULTURAL else "元/㎡·天"
+
+
+def area_unit(category: Category) -> str:
+    """面积单位。农用为亩，房屋类为㎡。"""
+    return "亩" if category is Category.AGRICULTURAL else "㎡"
 
 
 def _strip_spaces(name: str) -> str:
@@ -100,6 +115,6 @@ def compose(project: Project, copy_path: Path | None = None) -> dict[str, str]:
         "资料清单": conditional["资料清单"][cert_key],
         "附件清单第三项": conditional["附件清单第三项"][cert_key],
         "查勘人署名": surveyor_text,
-        "面积单位": "亩" if project.is_land else "㎡",
-        "单价单位": "元/亩·年" if project.is_land else "元/㎡·天",
+        "面积单位": area_unit(project.category),
+        "单价单位": price_unit(project.category),
     }

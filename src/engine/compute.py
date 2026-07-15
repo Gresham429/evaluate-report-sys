@@ -86,7 +86,7 @@ def compute_from_selection(
     path: Path,
     selections: Sequence[Mapping[str, object]],
     store: InstanceStore,
-) -> Result:
+) -> tuple[Category, Result]:
     """从库里取出选中的实例，接入市场比较法引擎重算。
 
     Args:
@@ -96,7 +96,10 @@ def compute_from_selection(
         store: 已加载（`load()` 过）的实例库。
 
     Returns:
-        Result（比准价格、评估结果、离散度）。
+        `(类别, Result)`。类别一并返回是因为**数字离了单位就是误导**——
+        农用算出 1399.26（元/亩·年）与办公算出 2.83（元/㎡·天）量级差 500 倍，
+        谁拿到这些数字谁就得同时拿到判断单位的依据，不能让调用方自己去猜、
+        或另读一遍 Excel。
 
     Raises:
         ValueError: 选中数量不为 3、某项缺编号、编号不在库中、类别不符，
@@ -123,7 +126,7 @@ def compute_from_selection(
         # 这不是系统故障，是估价师填了个物理上不成立的指数，同样按 400 报告。
         raise ValueError("市场状况指数或档次取值导致比准价格算出 0，无法计算离散度，请核对填写") from exc
     logger.info(
-        "重算完成：比准价格=%s 评估结果=%s 离散度=%s",
-        result.比准价格, result.评估结果, result.离散度,
+        "重算完成：类别=%s 比准价格=%s 评估结果=%s 离散度=%s",
+        category.value, result.比准价格, result.评估结果, result.离散度,
     )
-    return result
+    return category, result

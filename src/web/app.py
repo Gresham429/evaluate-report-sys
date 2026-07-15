@@ -22,13 +22,15 @@ from fastapi.responses import FileResponse, HTMLResponse
 from starlette.background import BackgroundTask
 
 from src.attachments.collector import AttachmentPage, collect
+from src.engine.annual import annual_value
 from src.engine.compute import compute_from_selection
 from src.extractor.project import load_project
 from src.library.importer import import_from_excel
 from src.library.store import DEFAULT_STORE_PATH, InstanceStore
 from src.model import Category, Project, Subject
+from src.prose.composer import area_unit, price_unit
 from src.renderer.render import render
-from src.validator.checks import validate
+from src.validator.checks import check_dispersion, validate
 
 logger = logging.getLogger(__name__)
 
@@ -227,7 +229,7 @@ def create_app() -> FastAPI:
         try:
             store = InstanceStore(_store_path())
             store.load()
-            result = compute_from_selection(path, raw_selected, store)
+            category, result = compute_from_selection(path, raw_selected, store)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         finally:
@@ -237,7 +239,40 @@ def create_app() -> FastAPI:
             "比准价格": list(result.比准价格),
             "评估结果": result.评估结果,
             "离散度": result.离散度,
+            # 单位随数字一起走：农用 1399.26 与办公 2.83 差 500 倍，
+            # 让界面自己去配单位，早晚配错一次。
+            "单价单位": price_unit(category),
+            # 重算出的离散度同样要过校验——它会跟着结果进报告，而 /api/extract
+            # 那次校验查的是 Excel 里的旧值。**只提示，不阻断**：换不换实例是
+            # 估价师的判断。
+            "提示": [asdict(w) for w in check_dispersion(result.离散度)],
         }
+
+    @app.post("/api/annual-values")
+    def annual_values(payload: dict[str, Any]) -> dict[str, object]:
+        """按单价与面积重算各估价对象的年租赁价值。
+
+        界面上估价师改了一览表的单价，年租赁价值须跟着变。公式（农用 面积×单价、
+        房屋类 ROUND(面积×单价×365,0)）**只在 Python 里实现一次**，界面不自己算——
+        照抄一份到 JS 里，两份迟早算出两个数。
+        """
+        try:
+            category = Category(str(payload.get("category", "")))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400, detail=f"未知类别：{payload.get('category')!r}"
+            ) from exc
+        raw = payload.get("subjects")
+        if not isinstance(raw, list):
+            raise HTTPException(status_code=400, detail="subjects 字段缺失或格式错误")
+        try:
+            values = [
+                annual_value(category, _to_float(item["area"]), _to_float(item["unit_price"]))
+                for item in raw
+            ]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=f"面积或单价不是有效数字：{exc}") from exc
+        return {"annual_values": values}
 
     @app.post("/api/extract")
     async def extract(file: UploadFile) -> dict[str, object]:
@@ -257,7 +292,13 @@ def create_app() -> FastAPI:
         payload = asdict(project)
         payload["category"] = project.category.value
         payload["subjects"] = [asdict(s) for s in project.subjects]
-        return {"project": payload, "warnings": [asdict(w) for w in warnings]}
+        return {
+            "project": payload,
+            "warnings": [asdict(w) for w in warnings],
+            # 界面据此给一览表的表头标单位，不在 JS 里另写一份农用/房屋的判断。
+            "单价单位": price_unit(project.category),
+            "面积单位": area_unit(project.category),
+        }
 
     @app.post("/api/render")
     async def render_report(
