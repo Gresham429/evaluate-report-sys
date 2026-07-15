@@ -72,3 +72,12 @@ Task 10: complete (commit 见上) — 附件收集与 PDF 转图（PyMuPDF，非
   当前全量: 81 passed, mypy clean, ruff clean
 
 进度: 9/15
+
+Task 8: complete (commit 62fe86f, 10 项测试) — 条件组句器
+  ✅ 控制者亲自在真实数据上核对三类输出，与金样一致：
+     农用 D46=郑伟娜→署名 / 办公 D46=胡柯→不署名（本身是抬头签字人）/ 商业 郑伟娜→署名
+     权证条件同时驱动正文资料清单与附件第三项，联动无误
+     单位随类别：农用 亩/元·亩·年，房屋类 ㎡/元·㎡·天
+  当前全量: 91 passed, mypy clean, ruff clean
+
+进度: 10/15 —— 下一步 Task 11 模板构建（第一个真风险点）
