@@ -1,0 +1,146 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>房地产估价报告生成系统</title>
+<style>
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+         max-width: 900px; margin: 2rem auto; padding: 0 1rem; line-height: 1.6; }
+  h1 { font-size: 1.4rem; }
+  .step { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+  .warn { background: #fff8e1; border-left: 3px solid #f0a000; padding: .5rem .75rem; margin: .4rem 0; }
+  label { display: block; margin: .5rem 0 .2rem; font-size: .85rem; color: #555; }
+  input[type=text] { width: 100%; padding: .4rem; border: 1px solid #ccc; border-radius: 4px; }
+  table { border-collapse: collapse; width: 100%; margin-top: .5rem; }
+  th, td { border: 1px solid #ddd; padding: .4rem; font-size: .85rem; text-align: left; }
+  ul#file-list { list-style: none; padding: 0; margin: .5rem 0 0; }
+  ul#file-list li { display: flex; align-items: center; gap: .4rem; padding: .3rem 0;
+                     border-bottom: 1px solid #eee; font-size: .85rem; }
+  ul#file-list li span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  button { cursor: pointer; }
+  button:disabled { cursor: not-allowed; opacity: .5; }
+  .hint { color: #777; font-size: .8rem; }
+</style>
+<h1>房地产估价报告生成系统</h1>
+<div class="step">
+  <strong>① 选择 Excel</strong>
+  <input type="file" id="xlsx" accept=".xlsx">
+</div>
+<div class="step" id="review" hidden>
+  <strong>② 复核数据</strong>
+  <div id="warnings"></div>
+  <div id="fields"></div>
+  <table id="subjects"></table>
+  <p class="hint">表格数值不重算、不可在此修改；若与 Excel 不符，请回 Excel 改好、保存后重新导入。</p>
+</div>
+<div class="step" id="attachments" hidden>
+  <strong>③ 挑附件、排序</strong>
+  <input type="file" id="attach-input" multiple
+         accept=".pdf,.jpg,.jpeg,.png,.bmp,.gif,.tif,.tiff">
+  <p class="hint">可不选，直接跳过；顺序即报告中出现的顺序，用「↑」「↓」调整。</p>
+  <ul id="file-list"></ul>
+</div>
+<div class="step" id="generate-step" hidden>
+  <strong>④ 生成下载</strong>
+  <div>
+    <button id="generate" disabled>生成报告</button>
+  </div>
+  <p class="hint" id="generate-status"></p>
+</div>
+<script>
+let currentProject = null;
+let attachmentFiles = [];
+
+function renderFileList() {
+  const list = document.getElementById('file-list');
+  list.innerHTML = attachmentFiles.map((f, i) => `
+    <li>
+      <span>${i + 1}. ${f.name}</span>
+      <button type="button" data-action="up" data-index="${i}" ${i === 0 ? 'disabled' : ''}>↑</button>
+      <button type="button" data-action="down" data-index="${i}" ${i === attachmentFiles.length - 1 ? 'disabled' : ''}>↓</button>
+      <button type="button" data-action="remove" data-index="${i}">×</button>
+    </li>`).join('');
+}
+
+document.getElementById('file-list').addEventListener('click', (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement) || !target.dataset.action) return;
+  const index = Number(target.dataset.index);
+  if (target.dataset.action === 'up' && index > 0) {
+    [attachmentFiles[index - 1], attachmentFiles[index]] = [attachmentFiles[index], attachmentFiles[index - 1]];
+  } else if (target.dataset.action === 'down' && index < attachmentFiles.length - 1) {
+    [attachmentFiles[index + 1], attachmentFiles[index]] = [attachmentFiles[index], attachmentFiles[index + 1]];
+  } else if (target.dataset.action === 'remove') {
+    attachmentFiles.splice(index, 1);
+  }
+  renderFileList();
+});
+
+document.getElementById('attach-input').addEventListener('change', (event) => {
+  const input = event.target;
+  attachmentFiles = attachmentFiles.concat(Array.from(input.files));
+  input.value = '';
+  renderFileList();
+});
+
+document.getElementById('xlsx').addEventListener('change', async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  const form = new FormData();
+  form.append('file', file);
+  const response = await fetch('/api/extract', { method: 'POST', body: form });
+  if (!response.ok) { alert((await response.json()).detail); return; }
+  const { project, warnings } = await response.json();
+  currentProject = project;
+  document.getElementById('review').hidden = false;
+  document.getElementById('attachments').hidden = false;
+  document.getElementById('generate-step').hidden = false;
+  document.getElementById('generate').disabled = false;
+  document.getElementById('generate-status').textContent = '';
+  document.getElementById('warnings').innerHTML =
+    warnings.map(w => `<div class="warn">${w.message}</div>`).join('');
+  const keys = ['category', 'report_no', 'client', 'owner', 'address', 'usage', 'value_date'];
+  document.getElementById('fields').innerHTML = keys.map(k =>
+    `<label>${k}</label><input type="text" data-field="${k}" value="${project[k] ?? ''}">`).join('');
+  document.querySelectorAll('#fields input[data-field]').forEach((input) => {
+    input.addEventListener('input', () => {
+      currentProject[input.dataset.field] = input.value;
+    });
+  });
+  const rows = project.subjects.map(s =>
+    `<tr><td>${s.index}</td><td>${s.address}</td><td>${s.area}</td>
+     <td>${s.unit_price}</td><td>${s.annual_value.toLocaleString()}</td></tr>`).join('');
+  document.getElementById('subjects').innerHTML =
+    `<tr><th>序号</th><th>地址</th><th>面积</th><th>单价</th><th>年租赁价值</th></tr>${rows}`;
+});
+
+document.getElementById('generate').addEventListener('click', async () => {
+  if (!currentProject) return;
+  const button = document.getElementById('generate');
+  const status = document.getElementById('generate-status');
+  button.disabled = true;
+  status.textContent = '生成中……';
+  const form = new FormData();
+  form.append('project', JSON.stringify(currentProject));
+  attachmentFiles.forEach(f => form.append('files', f));
+  try {
+    const response = await fetch('/api/render', { method: 'POST', body: form });
+    if (!response.ok) {
+      const body = await response.json();
+      status.textContent = '生成失败：' + body.detail;
+      return;
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/);
+    const filename = match ? decodeURIComponent(match[1]) : '估价报告.docx';
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+    status.textContent = '已下载：' + filename;
+  } finally {
+    button.disabled = false;
+  }
+});
+</script>
