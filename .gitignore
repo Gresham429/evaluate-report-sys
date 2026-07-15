@@ -19,8 +19,10 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 
-# SDD 工作区（brief / report / diff 等临时产物）
-.superpowers/
+# SDD 临时产物。progress.md 是恢复用的进度账本，须入库。
+.superpowers/sdd/*-brief.md
+.superpowers/sdd/*-report.md
+.superpowers/sdd/*.diff
 
 # 系统
 .DS_Store
