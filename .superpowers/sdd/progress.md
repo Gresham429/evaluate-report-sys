@@ -214,3 +214,11 @@ Task 1: complete (commit 2fa7538, 11 项测试, 全量 157) — 知识提取器
      幽灵行成对出现 → 该修正不只是计数问题，是 read_subject_levels 正确性的前提。
   - Minor 待后续对齐: knowledge.py 的 coefficient 转换未像 comparison.py 的 _as_float
     那样显式排除 bool（bool 是 int 子类）。当前三份素材未触发，属风险敞口。
+
+Task 2: complete (commit 5ea0def, 5 项测试, 全量 162) — 公式声明 YAML + 策略
+  ✅ 公式完整显式声明在 knowledge/比较法-市场比较法-2026版.yaml，供估价师核对
+     （直接回应用户异议：「估价知识是他们总结出来的函数形式，请完整表达出来」）
+  ✅ YAML 含对照基准（12 个数字），算歪即红
+  ✅ 权重条目写明不可调的理由，将来想开放的人会先撞见它
+  ✅ 控制者独立复核: 策略 vs Excel，三类 12 个数字全部精确复现
+  - Minor: brief 的 Interfaces 摘要漏列 MethodSpec.weights 字段（文档疏漏，代码正确）
