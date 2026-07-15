@@ -9,6 +9,7 @@
 
 import json
 import logging
+import os
 import shutil
 import sys
 import tempfile
@@ -21,6 +22,7 @@ from starlette.background import BackgroundTask
 
 from src.attachments.collector import AttachmentPage, collect
 from src.extractor.project import load_project
+from src.library.store import DEFAULT_STORE_PATH, InstanceStore
 from src.model import Category, Project, Subject
 from src.renderer.render import render
 from src.validator.checks import validate
@@ -33,6 +35,11 @@ _STATIC = Path(__file__).with_name("static")
 
 # 未打包成生成 docx 文件名的非法字符（Windows 文件系统禁用字符）。
 _UNSAFE_FILENAME_CHARS = frozenset('/\\:*?"<>|')
+
+
+def _store_path() -> Path:
+    """实例库路径。测试通过环境变量覆盖。"""
+    return Path(os.environ.get("实例库路径", str(DEFAULT_STORE_PATH)))
 
 
 def _to_float(value: object) -> float:
@@ -118,6 +125,37 @@ def create_app() -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
         return HTMLResponse((_STATIC / "index.html").read_text(encoding="utf-8"))
+
+    @app.get("/api/instances")
+    def list_instances(category: str) -> dict[str, object]:
+        """按类别列出实例，起始日从新到旧。
+
+        **不做推荐、不高亮、不打分、不筛选**——哪条更可比由估价师判断。
+        """
+        try:
+            cat = Category(category)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"未知类别：{category}") from exc
+        store = InstanceStore(_store_path())
+        store.load()
+        return {
+            "instances": [
+                {
+                    "编号": i.编号,
+                    "类别": i.类别.value,
+                    "位置": i.位置,
+                    "成交价": i.成交价,
+                    "面积": i.面积,
+                    "出租用途": i.出租用途,
+                    "交易情况": i.交易情况,
+                    "租期原文": i.租期原文,
+                    "起始日": i.起始日.isoformat() if i.起始日 else None,
+                    "日期精度": i.日期精度.value,
+                    "备注": i.备注,
+                }
+                for i in store.list_by_category(cat)
+            ]
+        }
 
     @app.post("/api/extract")
     async def extract(file: UploadFile) -> dict[str, object]:

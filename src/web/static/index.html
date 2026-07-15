@@ -31,15 +31,77 @@
   <table id="subjects"></table>
   <p class="hint">表格数值不重算、不可在此修改；若与 Excel 不符，请回 Excel 改好、保存后重新导入。</p>
 </div>
+<div class="step" id="instances" hidden>
+  <strong>③ 选择可比实例</strong> <span id="instHint"></span>
+  <div id="instList"></div>
+  <div class="warn" style="background:#eef4ff;border-left-color:#4a7dd0">
+    ⓘ 按租期起始日从新到旧排列。系统不做可比性推荐——哪条更可比，由你的专业判断决定。<br>
+    市场状况指数须逐条填写，系统不推算、不给默认值。
+  </div>
+</div>
+<script>
+let currentInstanceCategory = '';
+let currentInstanceTotal = 0;
+
+/** 从实例选择区的真实 DOM 读取当前值——不是快照，每次调用都取最新填写。 */
+function collectSelectedInstances() {
+  return Array.from(document.querySelectorAll('#instList .instRow')).flatMap((row) => {
+    const pick = row.querySelector('.instPick');
+    if (!(pick instanceof HTMLInputElement) || !pick.checked) return [];
+    const idxInput = row.querySelector('.mktIdx');
+    const noteInput = row.querySelector('.mktNote');
+    return [{
+      编号: pick.value,
+      市场状况指数: idxInput instanceof HTMLInputElement ? idxInput.value.trim() : '',
+      备注: noteInput instanceof HTMLInputElement ? noteInput.value.trim() : '',
+    }];
+  });
+}
+
+function updateInstHint() {
+  const selected = collectSelectedInstances();
+  const filled = selected.filter((s) => s.市场状况指数 !== '').length;
+  document.getElementById('instHint').textContent =
+    `（${currentInstanceCategory}类，共 ${currentInstanceTotal} 条 · 已选 ${selected.length}/3 条` +
+    (selected.length ? `，已填市场状况指数 ${filled}/${selected.length}` : '') + `）`;
+}
+
+async function loadInstances(category) {
+  const r = await fetch('/api/instances?category=' + encodeURIComponent(category));
+  if (!r.ok) return;
+  const { instances } = await r.json();
+  currentInstanceCategory = category;
+  currentInstanceTotal = instances.length;
+  document.getElementById('instances').hidden = false;
+  document.getElementById('instList').innerHTML = instances.map(i => `
+    <div class="instRow" style="border-bottom:1px solid #eee;padding:.5rem 0">
+      <label style="display:flex;gap:.5rem;align-items:baseline">
+        <input type="checkbox" class="instPick" value="${i.编号}">
+        <span><strong>${i.编号}</strong> — ${i.成交价} 元
+          <br><small style="color:#666">租期 ${i.租期原文}
+          ${i.日期精度 !== '完整' ? '<span style="color:#c60">⚠ 日期' + i.日期精度 + '</span>' : ''}</small>
+        </span>
+      </label>
+      <div style="margin-left:1.5rem;margin-top:.3rem">
+        市场状况指数 <input type="text" size="6" class="mktIdx" data-id="${i.编号}" placeholder="必填">
+        判断依据 <input type="text" size="20" class="mktNote" data-id="${i.编号}" placeholder="选填">
+      </div>
+    </div>`).join('');
+  updateInstHint();
+}
+
+document.getElementById('instList').addEventListener('input', updateInstHint);
+document.getElementById('instList').addEventListener('change', updateInstHint);
+</script>
 <div class="step" id="attachments" hidden>
-  <strong>③ 挑附件、排序</strong>
+  <strong>④ 挑附件、排序</strong>
   <input type="file" id="attach-input" multiple
          accept=".pdf,.jpg,.jpeg,.png,.bmp,.gif,.tif,.tiff">
   <p class="hint">可不选，直接跳过；顺序即报告中出现的顺序，用「↑」「↓」调整。</p>
   <ul id="file-list"></ul>
 </div>
 <div class="step" id="generate-step" hidden>
-  <strong>④ 生成下载</strong>
+  <strong>⑤ 生成下载</strong>
   <div>
     <button id="generate" disabled>生成报告</button>
   </div>
@@ -93,6 +155,7 @@ document.getElementById('xlsx').addEventListener('change', async (event) => {
   document.getElementById('review').hidden = false;
   document.getElementById('attachments').hidden = false;
   document.getElementById('generate-step').hidden = false;
+  loadInstances(project.category);
   document.getElementById('generate').disabled = false;
   document.getElementById('generate-status').textContent = '';
   document.getElementById('warnings').innerHTML =
