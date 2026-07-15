@@ -190,3 +190,16 @@ Task 13: complete (commit 23f09e5 + 修复 eaf5d79 + 白名单) — 金样回归
   最终: 146 passed, mypy clean, ruff clean, 0 xfail, 0 skip
 
 进度: 15/15 全部完成
+
+═══════════════════════════════════════════════════════
+第二轮：比较法引擎与实例库
+计划：docs/superpowers/plans/2026-07-16-比较法引擎与实例库.md（6 个任务）
+分支：feat/comparison-engine（从 feat/report-generator 起）
+基线：146 passed
+
+Pre-flight：
+- 用户确认「输入抽象本轮不做」（设计 §5，YAGNI，钉钉立项时一并做）
+- 第一等测试 = test_swapping_instance_changes_result，非复现 12 个数字。
+  上一轮教训：拿金样自己的数据算当然能复现，验不出「换了输入还算不算得对」。
+
+## 任务进度
