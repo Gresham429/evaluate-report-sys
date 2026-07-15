@@ -116,3 +116,24 @@ Task 11: complete (commit dde5c66 + 修复 f0b27c4, 13 项测试) — 模板构�
   当前全量: 109 passed, mypy clean, ruff clean
 
 进度: 11/15 —— 下一步 Task 12 渲染器，然后 Task 13 金样回归（验收判据）
+
+Task 12: complete (commit e4489ab, 8 项测试) — docx 渲染器
+  - 代理自行解决附件循环缺失：在 build_templates.py 加 _inject_attachment_loop()，
+    先在沙盒验证再动真脚本。不是手工改 docx（那样下次构建就丢）
+Task 14: complete (commit a2b3b83, 4 项测试) — 本地网页应用
+  ⚠️ 代理发现计划两处实质缺陷：
+     1. brief 的 JS 渲染 <input value=...> 却不监听编辑事件 → 用户改的字提交时丢失，
+        「复核界面可编辑」按计划做出来只是摆设。代理自行接上回写逻辑。
+     2. brief 的 app.py 漏了 /api/render 路由（Interfaces 声明了但示例代码没有）
+Task 15: complete (commit d00e4de) — 打包脚本与文档
+  ⚠️ Mac 上打不出 .exe（PyInstaller 不支持交叉编译），已在 README 与报告中写明；
+     用户须在 Windows 机器上跑一次 uv run python build_exe.py
+
+【待修 P0】copy.yaml 外置承诺在打包后不成立：
+  render.py 的 build_context 调 compose(project) 未传 copy_path，
+  composer 的默认查找 Path(__file__).with_name('copy.yaml') 在 PyInstaller 冻结包里
+  会解析到临时解压目录 _MEIPASS，而非 exe 旁边的外置文件。
+  → 设计第5节对用户承诺「改 copy.yaml 不用重新编译」，当前实现兑现不了。
+【待验】__main__.py 的包相对 import 在冻结包中未经验证（Mac 无法交叉编译测试）
+
+进度: 14/15 已提交，剩 Task 13 金样回归 + 代理1 的一览表参数化修复
