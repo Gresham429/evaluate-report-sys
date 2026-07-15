@@ -38,6 +38,11 @@ target-version = "py311"
 module = ["fitz.*", "fitz"]
 ignore_missing_imports = true
 
+# docxtpl 不随包分发 py.typed，PyPI 也无 types-docxtpl 存根包可装。
+[[tool.mypy.overrides]]
+module = ["docxtpl.*", "docxtpl"]
+ignore_missing_imports = true
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

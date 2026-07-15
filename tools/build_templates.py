@@ -198,6 +198,36 @@ def _strip_embedded_pictures(xml: str) -> str:
     return xml
 
 
+# 金样里「附 件」章节末尾的扫描件页面（委托协议、权证复印件等）已随
+# _strip_embedded_pictures 一并清空为空段落——那些页数是当次案例的具体
+# 数量，不是模板该有的骨架。改为在章节末尾追加一段 Jinja 循环，运行时
+# 按 render.render() 传入的 attachment_images（Task 12 render.py 组装，
+# 来自 collect() 展开的用户附件）逐页插入，页数随输入变化。
+# 空 has_attachments 时 {% if %} 整段（含分页符）不产出任何内容，附件
+# 一个都不选也能正常出报告（约束见 task-12-brief.md「附件可留空」）。
+_ATTACHMENT_LOOP_PARAGRAPH = (
+    "<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr>"
+    "<w:r><w:t>{% if has_attachments %}</w:t></w:r>"
+    "<w:r><w:br w:type=\"page\"/><w:t>{% for img in attachment_images %}</w:t></w:r>"
+    "<w:r><w:t>{{ img }}</w:t></w:r>"
+    "<w:r><w:t>{% endfor %}</w:t></w:r>"
+    "<w:r><w:t>{% endif %}</w:t></w:r>"
+    "</w:p>"
+)
+
+
+def _inject_attachment_loop(xml: str) -> str:
+    """在正文最后一个 <w:sectPr>（body 级别的收尾节属性）前插入附件循环段落。
+
+    Raises:
+        ValueError: 找不到 body 级别的 <w:sectPr>（document.xml 结构异常）。
+    """
+    index = xml.rfind("<w:sectPr")
+    if index == -1:
+        raise ValueError("word/document.xml 缺少 <w:sectPr>，模板结构异常")
+    return xml[:index] + _ATTACHMENT_LOOP_PARAGRAPH + xml[index:]
+
+
 def _media_kept_by_header_footer(source: zipfile.ZipFile, names: list[str]) -> set[str]:
     """word/media 下被 document.xml 以外部件（页眉/页脚等）引用的文件。
 
@@ -234,6 +264,7 @@ def build(tag: str, golden: Path, target: Path) -> None:
                     for raw, placeholder in SUBSTITUTIONS[tag]:
                         xml = xml.replace(raw, placeholder)
                     xml = _strip_embedded_pictures(xml)
+                    xml = _inject_attachment_loop(xml)
                     data = xml.encode("utf-8")
                 elif name == "word/_rels/document.xml.rels":
                     rels = data.decode("utf-8")
