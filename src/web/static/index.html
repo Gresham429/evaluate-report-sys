@@ -7,6 +7,8 @@
 
   字体全部取本机已装字库，不引外部资源——本系统打包成内网单机 exe，
   联外网取字体既跑不通也不该跑（数据全程留在本机）。
+
+  三个页签：出报告（七步向导）、实例库、基础表。
 -->
 <style>
   :root {
@@ -47,7 +49,7 @@
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
   }
 
-  .sheet { position: relative; z-index: 1; max-width: 940px; margin: 0 auto; }
+  .sheet { position: relative; z-index: 1; max-width: 980px; margin: 0 auto; }
 
   /* ── 报头 ───────────────────────────────────────── */
   .masthead { display: flex; align-items: center; gap: 1.1rem; padding: 2.6rem 0 1rem; }
@@ -63,7 +65,6 @@
   }
   .masthead .sub { margin: .1rem 0 0; color: var(--ink-3); font-size: .78rem; letter-spacing: .04em; }
   .masthead-id { margin-left: auto; text-align: right; }
-  /* 公文头的双线：一粗一细 */
   .rule-double { border-top: 2px solid var(--ink); margin-bottom: 2px; }
   .rule-double + .rule-thin { border-top: 1px solid var(--ink); }
 
@@ -75,9 +76,20 @@
   .chip-seal { border-color: var(--seal); color: var(--seal); background: var(--seal-soft); }
   .chip-no { font-family: var(--num); font-size: .8rem; color: var(--ink); }
 
+  /* ── 页签 ───────────────────────────────────────── */
+  nav.tabs { display: flex; gap: .3rem; margin: 1rem 0 0; border-bottom: 1px solid var(--rule-2); }
+  nav.tabs button {
+    border: none; background: none; padding: .5rem 1rem; margin-bottom: -1px;
+    font-family: var(--serif); font-size: .95rem; letter-spacing: .08em;
+    color: var(--ink-3); border-bottom: 2px solid transparent; border-radius: 0;
+  }
+  nav.tabs button:hover { color: var(--ink); }
+  nav.tabs button.on { color: var(--seal); border-bottom-color: var(--seal); }
+  .page[hidden] { display: none; }
+
   /* ── 步骤 ───────────────────────────────────────── */
   .step {
-    position: relative; display: grid; grid-template-columns: 3.2rem 1fr;
+    display: grid; grid-template-columns: 3.2rem 1fr;
     gap: 1rem; padding: 1.5rem 0 1.6rem;
     border-bottom: 1px solid var(--rule);
   }
@@ -88,23 +100,19 @@
     border-right: 1px solid var(--rule); user-select: none;
   }
   .step.on .step-no { color: var(--seal); }
-  .step h2 {
+  .step h2, .panel h2 {
     margin: 0 0 .1rem; font-size: 1rem; font-weight: 600; letter-spacing: .04em;
     display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap;
   }
-  .step h2 .sub { font-weight: 400; font-size: .78rem; color: var(--ink-3); letter-spacing: 0; }
+  .step h2 .sub, .panel h2 .sub {
+    font-weight: 400; font-size: .78rem; color: var(--ink-3); letter-spacing: 0;
+  }
+  .panel { padding: 1.5rem 0; border-bottom: 1px solid var(--rule); }
   .hint { color: var(--ink-3); font-size: .78rem; margin: .45rem 0 0; }
 
-  /* 页面载入时逐级显影 */
-  .step { animation: rise .5s cubic-bezier(.2,.7,.3,1) both; }
-  .step:nth-child(2) { animation-delay: .04s }
-  .step:nth-child(3) { animation-delay: .08s }
-  @keyframes rise { from { opacity: 0; transform: translateY(6px) } }
-
   /* ── 控件 ───────────────────────────────────────── */
-  /* 原生 file 控件的按钮文字（Choose File / No file chosen）由浏览器给，
-     改不了措辞，在全中文界面里格外扎眼。故藏起真控件，用 label 代之——
-     label 点击会转发给它包住的 input，功能一模一样。 */
+  /* 原生 file 控件的按钮文字（Choose File / No file chosen）由浏览器给，改不了
+     措辞，在全中文界面里格外扎眼。故藏起真控件，用 label 代之。 */
   .filebtn {
     display: inline-block; font-size: .85rem; padding: .42rem 1.1rem; cursor: pointer;
     border: 1px solid var(--rule-2); border-radius: 2px;
@@ -113,18 +121,21 @@
   }
   .filebtn:hover { border-color: var(--seal); color: var(--seal); }
 
-  input[type=text] {
+  input[type=text], input[type=date], select, textarea {
     width: 100%; padding: .38rem .5rem; font: inherit; font-size: .85rem;
     color: var(--ink); background: var(--card);
     border: 1px solid var(--rule-2); border-radius: 2px;
     transition: border-color .15s, box-shadow .15s;
   }
-  input[type=text]:focus {
+  textarea { resize: vertical; min-height: 3.6rem; line-height: 1.6; }
+  select { cursor: pointer; }
+  input:focus, select:focus, textarea:focus {
     outline: none; border-color: var(--seal);
     box-shadow: 0 0 0 2px var(--seal-soft);
   }
-  input[type=text]::placeholder { color: #b8b0a6; }
+  input::placeholder, textarea::placeholder { color: #b8b0a6; }
   input[type=checkbox] { accent-color: var(--seal); width: 15px; height: 15px; }
+  select.unset { color: var(--ink-3); }
 
   button {
     font: inherit; font-size: .85rem; padding: .42rem 1.1rem; cursor: pointer;
@@ -141,8 +152,16 @@
   button.mini { padding: .1rem .45rem; font-size: .75rem; line-height: 1.4; }
 
   /* ── 字段表单 ───────────────────────────────────── */
-  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: .7rem 1.1rem; margin-top: .8rem; }
-  .fields label { display: block; font-size: .72rem; color: var(--ink-3); letter-spacing: .05em; margin-bottom: .18rem; }
+  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: .7rem 1.1rem; margin-top: .8rem; }
+  .fields .wide { grid-column: 1 / -1; }
+  .fields label, .factor label { display: block; font-size: .72rem; color: var(--ink-3); letter-spacing: .05em; margin-bottom: .18rem; }
+  .fields .cell.empty input, .fields .cell.empty textarea, .fields .cell.empty select { border-left: 2px solid var(--rule-2); }
+
+  /* ── 28 个因素档次 ──────────────────────────────── */
+  .factors { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: .6rem 1.1rem; margin-top: .8rem; }
+  .factor label { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; }
+  .factor label .coef { font-family: var(--num); font-size: .68rem; color: var(--rule-2); }
+  .factor.unset select { border-left: 2px solid var(--seal); }
 
   /* ── 账簿式表格 ─────────────────────────────────── */
   table { border-collapse: collapse; width: 100%; margin-top: .9rem; }
@@ -151,19 +170,13 @@
     text-align: left; padding: 0 .5rem .4rem; border-bottom: 1px solid var(--rule-2);
     white-space: nowrap;
   }
-  tbody td {
-    padding: .5rem; font-size: .85rem; border-bottom: 1px solid var(--rule);
-    vertical-align: middle;
-  }
-  tfoot td {
-    padding: .5rem; font-size: .8rem; border-top: 1px solid var(--rule-2);
-    color: var(--ink-2); font-weight: 600;
-  }
+  tbody td { padding: .35rem .5rem; font-size: .85rem; border-bottom: 1px solid var(--rule); vertical-align: middle; }
+  tfoot td { padding: .5rem; font-size: .8rem; border-top: 1px solid var(--rule-2); color: var(--ink-2); font-weight: 600; }
   .num { font-family: var(--num); font-variant-numeric: tabular-nums; text-align: right; }
   th.num { text-align: right; }
   td.idx { color: var(--ink-3); font-family: var(--num); width: 2rem; }
-  .price-cell input { text-align: right; font-family: var(--num); font-variant-numeric: tabular-nums; padding: .25rem .4rem; }
-  .price-cell { width: 8.5rem; }
+  td input { padding: .25rem .4rem; }
+  td input.num { text-align: right; }
 
   /* ── 提示条 ─────────────────────────────────────── */
   .note, .warn, .err, .result {
@@ -192,7 +205,7 @@
     margin: .6rem 0 0 1.6rem; padding-top: .55rem; border-top: 1px dashed var(--rule-2);
   }
   .instRow.picked .instForm { display: flex; }
-  .instForm label { font-size: .74rem; color: var(--ink-3); letter-spacing: .04em; }
+  .instForm label { font-size: .74rem; color: var(--ink-3); letter-spacing: .04em; display: flex; align-items: center; gap: .4rem; }
   .instForm input { width: 5.5rem; font-family: var(--num); text-align: right; }
   .instForm input.wide { width: 15rem; font-family: var(--sans); text-align: left; }
 
@@ -207,17 +220,18 @@
   .figure.minor .v { font-size: 1.05rem; color: var(--ink-2); font-weight: 500; }
 
   /* ── 附件列表 ───────────────────────────────────── */
-  ul#file-list { list-style: none; padding: 0; margin: .7rem 0 0; }
-  ul#file-list li {
+  ul#file-list, ul.plain { list-style: none; padding: 0; margin: .7rem 0 0; }
+  ul#file-list li, ul.plain li {
     display: flex; align-items: center; gap: .4rem; padding: .38rem .5rem;
     border-bottom: 1px solid var(--rule); font-size: .82rem;
   }
-  ul#file-list li span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  ul#file-list li span.name, ul.plain li span.name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   ul#file-list li .ord { flex: none; font-family: var(--num); color: var(--ink-3); }
 
   .actions { display: flex; align-items: center; gap: .8rem; margin-top: .9rem; flex-wrap: wrap; }
   .status { font-size: .8rem; color: var(--ink-3); }
   .status.done { color: var(--jade); }
+  .ver { font-family: var(--num); font-size: .76rem; color: var(--ink-2); }
 </style>
 
 <div class="sheet">
@@ -232,31 +246,66 @@
   <div class="rule-double"></div>
   <div class="rule-thin"></div>
 
-  <main>
-    <section class="step on" id="step-xlsx">
+  <nav class="tabs">
+    <button data-tab="report" class="on">出报告</button>
+    <button data-tab="library">实例库</button>
+    <button data-tab="base">基础表</button>
+  </nav>
+
+  <!-- ═══════════════ 出报告 ═══════════════ -->
+  <main class="page" id="page-report">
+    <section class="step on" id="step-source">
       <div class="step-no">壹</div>
       <div class="step-body">
-        <h2>选择 Excel <span class="sub">实勘表、比较法（.xlsx）</span></h2>
+        <h2>开始 <span class="sub">表单为主；导入 Excel 只是把表单一次填好</span></h2>
         <div class="actions">
-          <label class="filebtn">选择文件<input type="file" id="xlsx" accept=".xlsx" hidden></label>
-          <span class="status" id="xlsx-status">尚未选择</span>
+          <select id="newCategory" style="width:auto">
+            <option value="">选择类别…</option>
+            <option value="农用">农用</option>
+            <option value="办公">办公</option>
+            <option value="商业">商业</option>
+          </select>
+          <button id="newBtn" type="button">新建空白表单</button>
+          <label class="filebtn">导入 Excel 预填<input type="file" id="xlsx" accept=".xlsx" hidden></label>
+          <span class="status" id="xlsx-status"></span>
         </div>
+        <div class="err" id="sourceError" hidden></div>
+        <div id="draftList"></div>
       </div>
     </section>
 
-    <section class="step" id="review" hidden>
+    <section class="step" id="step-basic" hidden>
       <div class="step-no">贰</div>
       <div class="step-body">
-        <h2>复核数据 <span class="sub">改动只影响本次生成，不回写 Excel</span></h2>
+        <h2>基本信息 <span class="sub">19 项，全部人工填——系统不拼凑</span></h2>
         <div id="warnings"></div>
         <div class="fields" id="fields"></div>
+      </div>
+    </section>
+
+    <section class="step" id="step-subjects" hidden>
+      <div class="step-no">叁</div>
+      <div class="step-body">
+        <h2>估价对象一览表 <span class="sub">单价由第伍步算，年租赁价值自动跟算</span></h2>
         <table id="subjects"></table>
+        <div class="actions">
+          <button id="addSubject" type="button">增加一行</button>
+        </div>
         <div class="note" id="priceSource"></div>
       </div>
     </section>
 
-    <section class="step" id="instances" hidden>
-      <div class="step-no">叁</div>
+    <section class="step" id="step-levels" hidden>
+      <div class="step-no">肆</div>
+      <div class="step-body">
+        <h2>估价对象因素档次 <span class="sub" id="levelsHint"></span></h2>
+        <div class="note">档次选项全部来自基础表——估价师维护基础表即维护选项，系统不编造档次。</div>
+        <div class="factors" id="factors"></div>
+      </div>
+    </section>
+
+    <section class="step" id="step-instances" hidden>
+      <div class="step-no">伍</div>
       <div class="step-body">
         <h2>选择可比实例 <span class="sub" id="instHint"></span></h2>
         <div class="note">
@@ -273,109 +322,417 @@
       </div>
     </section>
 
-    <section class="step" id="attachments" hidden>
-      <div class="step-no">肆</div>
+    <section class="step" id="step-attachments" hidden>
+      <div class="step-no">陆</div>
       <div class="step-body">
         <h2>挑附件、排序 <span class="sub">可不选，直接跳过</span></h2>
         <div class="actions">
           <label class="filebtn">添加附件<input type="file" id="attach-input" multiple hidden
                  accept=".pdf,.jpg,.jpeg,.png,.bmp,.gif,.tif,.tiff"></label>
-          <span class="status">顺序即报告中出现的顺序，用「↑」「↓」调整</span>
+          <span class="status">顺序即报告中出现的顺序，用「↑」「↓」调整。附件不进草稿，续填后须重挑</span>
         </div>
         <ul id="file-list"></ul>
       </div>
     </section>
 
-    <section class="step" id="generate-step" hidden>
-      <div class="step-no">伍</div>
+    <section class="step" id="step-generate" hidden>
+      <div class="step-no">柒</div>
       <div class="step-body">
         <h2>生成下载</h2>
         <div class="actions">
-          <button id="generate" class="primary" disabled>生成报告</button>
+          <button id="generate" class="primary">生成报告</button>
           <span class="status" id="generate-status"></span>
         </div>
       </div>
     </section>
   </main>
+
+  <!-- ═══════════════ 实例库 ═══════════════ -->
+  <main class="page" id="page-library" hidden>
+    <section class="panel">
+      <h2>实例库 <span class="sub">比较实例是低频累积的公司资产，与单份报告无关</span></h2>
+      <div class="actions">
+        <select id="libCategory" style="width:auto">
+          <option value="农用">农用</option>
+          <option value="办公" selected>办公</option>
+          <option value="商业">商业</option>
+        </select>
+        <label class="filebtn">从 Excel 批量导入<input type="file" id="libXlsx" accept=".xlsx" hidden></label>
+        <button id="newInstBtn" type="button">手工录入一条</button>
+        <span class="status" id="libStatus"></span>
+      </div>
+      <ul class="plain" id="libList"></ul>
+    </section>
+
+    <section class="panel" id="instFormPanel" hidden>
+      <h2>录入实例 <span class="sub">编号、起始日、日期精度由系统据租期原文派生</span></h2>
+      <div class="fields" id="instFields"></div>
+      <h2 style="margin-top:1.2rem">因素档次 <span class="sub" id="instLevelsHint"></span></h2>
+      <div class="factors" id="instFactors"></div>
+      <div class="actions">
+        <button id="saveInstBtn" type="button" class="primary">存入实例库</button>
+        <button id="cancelInstBtn" type="button">取消</button>
+        <span class="status" id="instSaveStatus"></span>
+      </div>
+      <div class="err" id="instError" hidden></div>
+    </section>
+  </main>
+
+  <!-- ═══════════════ 基础表 ═══════════════ -->
+  <main class="page" id="page-base" hidden>
+    <section class="panel">
+      <h2>基础表版本 <span class="sub">Excel 是权威，系统存副本，改了重导一次</span></h2>
+      <div class="note">
+        基础表是估价知识本身（28 个因素、各档次描述、修正系数），撤不掉。<br>
+        版本号是<strong>内容指纹</strong>，非人工填写——内容一变指纹即变，改不了也伪造不了。<br>
+        <strong>旧版本永不覆盖</strong>：能拿旧版把当时的结果重算出来，是可复查的前提。
+      </div>
+      <div class="actions">
+        <select id="baseCategory" style="width:auto">
+          <option value="农用">农用</option>
+          <option value="办公" selected>办公</option>
+          <option value="商业">商业</option>
+        </select>
+        <label class="filebtn">导入基础表<input type="file" id="baseXlsx" accept=".xlsx" hidden></label>
+        <span class="status" id="baseStatus"></span>
+      </div>
+      <table id="baseVersions"></table>
+    </section>
+  </main>
 </div>
 
 <script>
-let currentProject = null;      // 唯一的项目状态，/api/render 提交的就是它
-let currentXlsxFile = null;     // ①选好的 xlsx，/api/compute 需重传（读估价对象档次）
-let attachmentFiles = [];
-let priceUnit = '';             // 单位一律由后端给，前端不自己判断农用/房屋
-let areaUnit = '';
-let currentInstanceCategory = '';
-let currentInstanceTotal = 0;
+'use strict';
 
 const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-/** 把步骤标为「当前」，只影响序号颜色。 */
+// ── 状态 ──────────────────────────────────────────────────
+let currentProject = null;   // 唯一的项目状态，/api/render 提交的就是它
+let subjectLevels = {};      // 28 个因素档次，/api/compute 用的就是这份
+let factors = [];            // 当前类别的因素与档次选项，来自基础表
+let baseTable = null;        // 当前基础表版本信息
+let attachmentFiles = [];    // 附件不进草稿：File 对象存不进 JSON
+let priceUnit = '', areaUnit = '';
+let draftId = null;
+let priceOrigin = 'empty';   // 一览表单价从哪来：empty/excel/computed/manual
+
+/**
+ * 19 项基本字段。标签**照抄估价师自己在 Excel 里写的**（A 列），不另起一套说法。
+ *
+ * certificate_status 必须是二选一，不能是自由文本：它从不印进报告，只靠
+ * 「已取得」这三个字的子串判断去驱动报告里三段套话（权证、资料清单、
+ * 附件清单第三项）。打成「有产权证」会静默套错话——这不是拼凑，是这个
+ * 控制字段本来的语义。
+ */
+const CERT_OPTIONS = ['估价对象已取得《不动产权证》', '估价对象未取得《不动产权证》'];
+const FIELDS = [
+  { k: 'report_no',          label: '评估报告编号' },
+  { k: 'project_name',       label: '项目名称', wide: true, area: true },
+  { k: 'client',             label: '委托人' },
+  { k: 'client_address',     label: '住址', wide: true },
+  { k: 'legal_rep',          label: '法定代表人或负责人' },
+  { k: 'owner',              label: '权利人' },
+  { k: 'address',            label: '地址', wide: true },
+  { k: 'usage',              label: '设定出租用途' },
+  { k: 'survey_date',        label: '实地勘查日期', type: 'date' },
+  { k: 'value_date',         label: '价值时点', type: 'date' },
+  { k: 'issue_date',         label: '估价报告出具日期', type: 'date' },
+  { k: 'work_period',        label: '估价作业期' },
+  { k: 'surveyor',           label: '现场查勘记录人员' },
+  { k: 'certificate_status', label: '是否取得产权证书', options: CERT_OPTIONS, wide: true },
+  { k: 'purpose',            label: '估价目的', wide: true, area: true },
+  { k: 'materials',          label: '委托人提供的材料', wide: true },
+  { k: 'scale',              label: '规模', wide: true, area: true },
+  { k: 'scope',              label: '估价范围', wide: true, area: true },
+  { k: 'current_status',     label: '现使用状况', wide: true, area: true },
+];
+
+const EMPTY_PROJECT = () => ({
+  category: '', report_no: '', project_name: '', client: '', client_address: '',
+  legal_rep: '', purpose: '', survey_date: '', value_date: '', materials: '',
+  certificate_status: '', owner: '', address: '', usage: '', scale: '', scope: '',
+  current_status: '', work_period: '', issue_date: '', surveyor: '',
+  unit_price: 0, dispersion: 0, subjects: [],
+});
+
+const EMPTY_SUBJECT = (index) => ({
+  index, owner: '', address: '', usage: '', area: 0, unit_price: 0, annual_value: 0,
+});
+
+// ── 页签 ──────────────────────────────────────────────────
+document.querySelectorAll('nav.tabs button').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('nav.tabs button').forEach((b) => b.classList.toggle('on', b === btn));
+    ['report', 'library', 'base'].forEach((p) => { $('page-' + p).hidden = p !== btn.dataset.tab; });
+    if (btn.dataset.tab === 'library') loadLibrary();
+    if (btn.dataset.tab === 'base') loadBaseVersions();
+  });
+});
+
 function markStep(id) {
-  document.querySelectorAll('.step').forEach((s) => s.classList.toggle('on', s.id === id));
+  document.querySelectorAll('#page-report .step').forEach((s) => s.classList.toggle('on', s.id === id));
 }
 
-// ── 一览表 ────────────────────────────────────────────────
+// ── 草稿 ──────────────────────────────────────────────────
 
-/** 一览表的单价从哪来——Excel 原值 / 重算值 / 人工改过。三种状态必须分得清。 */
-let priceOrigin = 'excel';
+/**
+ * 边填边存。单对象最少 52 项，实地勘察回来填、中途被打断是常态——填一半
+ * 关了浏览器不该全丢。附件存不进去（File 对象进不了 JSON），界面已注明。
+ */
+let saveTimer = null;
+function scheduleDraftSave() {
+  if (!currentProject) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveDraft, 800);
+}
+
+async function saveDraft() {
+  if (!currentProject) return;
+  const body = {
+    id: draftId,
+    数据: {
+      报告编号: currentProject.report_no,
+      类别: currentProject.category,
+      project: currentProject,
+      subject_levels: subjectLevels,
+      priceOrigin,
+    },
+  };
+  try {
+    const r = await fetch('/api/drafts', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    if (r.ok) draftId = (await r.json()).id;
+  } catch (err) {
+    // 草稿存不上不该打断填写——真正的数据在眼前的表单里，提示一声即可。
+    console.warn('草稿保存失败', err);
+  }
+}
+
+async function loadDraftList() {
+  const r = await fetch('/api/drafts');
+  if (!r.ok) return;
+  const { drafts } = await r.json();
+  if (!drafts.length) { $('draftList').innerHTML = ''; return; }
+  $('draftList').innerHTML = `
+    <p class="hint" style="margin-top:.9rem">未完成的草稿（边填边存，可续填）：</p>
+    <ul class="plain">${drafts.map((d) => `
+      <li>
+        <span class="name">${esc(d.报告编号 || '（未填报告编号）')}
+          <span class="chip">${esc(d.类别 || '?')}</span>
+        </span>
+        <span class="ver">${esc(d.更新时间.slice(0, 16).replace('T', ' '))}</span>
+        <button type="button" class="mini" data-draft="${esc(d.id)}">续填</button>
+        <button type="button" class="mini" data-drop="${esc(d.id)}">×</button>
+      </li>`).join('')}</ul>`;
+}
+
+$('draftList').addEventListener('click', async (event) => {
+  const t = event.target;
+  if (!(t instanceof HTMLElement)) return;
+  if (t.dataset.draft) {
+    const body = await (await fetch('/api/drafts/' + encodeURIComponent(t.dataset.draft))).json();
+    draftId = body.id;
+    currentProject = body.数据.project;
+    subjectLevels = body.数据.subject_levels || {};
+    priceOrigin = body.数据.priceOrigin || 'empty';
+    await openForm(currentProject.category, { keepDraft: true });
+  } else if (t.dataset.drop) {
+    await fetch('/api/drafts/' + encodeURIComponent(t.dataset.drop), { method: 'DELETE' });
+    loadDraftList();
+  }
+});
+
+// ── 打开表单 ──────────────────────────────────────────────
+
+/** 拉该类别的因素档次选项；基础表没进库就说清楚，不给个空表蒙人。 */
+async function loadFactors(category) {
+  const r = await fetch('/api/factors?category=' + encodeURIComponent(category));
+  if (r.status === 404) {
+    throw new Error(`还没有导入过${category}类基础表。请先到「基础表」页导入一份——` +
+      `基础表是估价知识本身（28 个因素、档次、修正系数），没有它无法给出档次选项，也无法重算。`);
+  }
+  if (!r.ok) throw new Error((await r.json()).detail);
+  const body = await r.json();
+  factors = body.factors;
+  baseTable = body.base_table;
+}
+
+async function openForm(category, { keepDraft = false } = {}) {
+  await loadFactors(category);
+  priceUnit = category === '农用' ? '元/亩·年' : '元/㎡·天';
+  areaUnit = category === '农用' ? '亩' : '㎡';
+  if (!keepDraft) draftId = null;
+
+  ['step-basic', 'step-subjects', 'step-levels', 'step-instances',
+   'step-attachments', 'step-generate'].forEach((id) => { $(id).hidden = false; });
+  $('sourceError').hidden = true;
+  $('masthead-id').innerHTML =
+    `<span class="chip chip-seal">${esc(category)}类</span>
+     <span class="chip chip-no">${esc(currentProject.report_no || '未编号')}</span>`;
+  $('levelsHint').innerHTML =
+    `${factors.length} 项 · 基础表 <span class="ver">${esc(baseTable?.指纹 || '?')}</span>` +
+    ` · 导入于 ${esc((baseTable?.导入时间 || '').slice(0, 10))}`;
+
+  renderFields();
+  renderSubjects();
+  renderFactors();
+  await loadInstances(category);
+  markStep('step-basic');
+}
+
+$('newBtn').addEventListener('click', async () => {
+  const category = $('newCategory').value;
+  if (!category) { $('sourceError').textContent = '请先选类别。'; $('sourceError').hidden = false; return; }
+  currentProject = EMPTY_PROJECT();
+  currentProject.category = category;
+  currentProject.subjects = [EMPTY_SUBJECT(1)];
+  subjectLevels = {};
+  priceOrigin = 'empty';
+  try {
+    await openForm(category);
+    $('xlsx-status').textContent = '';
+    scheduleDraftSave();
+  } catch (err) {
+    $('sourceError').textContent = err.message;
+    $('sourceError').hidden = false;
+  }
+});
+
+$('xlsx').addEventListener('change', async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  $('xlsx-status').textContent = '读取中……';
+  $('sourceError').hidden = true;
+  const form = new FormData();
+  form.append('file', file);
+  const response = await fetch('/api/extract', { method: 'POST', body: form });
+  if (!response.ok) {
+    $('xlsx-status').textContent = '';
+    $('sourceError').textContent = '读取失败：' + (await response.json()).detail;
+    $('sourceError').hidden = false;
+    return;
+  }
+  const body = await response.json();
+  currentProject = body.project;
+  subjectLevels = body.subject_levels;
+  priceOrigin = 'excel';
+  $('xlsx-status').textContent = file.name;
+  $('xlsx-status').className = 'status done';
+  try {
+    await openForm(currentProject.category);
+  } catch (err) {
+    $('sourceError').textContent = err.message;
+    $('sourceError').hidden = false;
+    return;
+  }
+  $('warnings').innerHTML = body.warnings.map((w) => `<div class="warn">${esc(w.message)}</div>`).join('');
+  scheduleDraftSave();
+});
+
+// ── 贰 基本信息 ───────────────────────────────────────────
+
+function renderFields() {
+  $('fields').innerHTML = FIELDS.map((f) => {
+    const v = currentProject[f.k] ?? '';
+    const empty = String(v).trim() === '' ? ' empty' : '';
+    let control;
+    if (f.options) {
+      control = `<select data-field="${f.k}" class="${v ? '' : 'unset'}">
+        <option value="">请选择…</option>
+        ${f.options.map((o) => `<option${o === v ? ' selected' : ''}>${esc(o)}</option>`).join('')}
+      </select>`;
+    } else if (f.area) {
+      control = `<textarea data-field="${f.k}" placeholder="实地勘察填写">${esc(v)}</textarea>`;
+    } else {
+      control = `<input type="${f.type || 'text'}" data-field="${f.k}" value="${esc(v)}">`;
+    }
+    return `<div class="cell${f.wide ? ' wide' : ''}${empty}"><label>${esc(f.label)}</label>${control}</div>`;
+  }).join('');
+}
+
+$('fields').addEventListener('input', (event) => {
+  const el = event.target;
+  if (!el.dataset || !el.dataset.field) return;
+  currentProject[el.dataset.field] = el.value;
+  el.closest('.cell')?.classList.toggle('empty', el.value.trim() === '');
+  if (el.dataset.field === 'report_no') {
+    $('masthead-id').innerHTML =
+      `<span class="chip chip-seal">${esc(currentProject.category)}类</span>
+       <span class="chip chip-no">${esc(el.value || '未编号')}</span>`;
+  }
+  scheduleDraftSave();
+});
+// change 而非 input：文本框改完（失焦）才校验一次，不跟着每个按键闪。
+// 三类控件都要接——只接 select 的话，规模字段写错了根本核不出来。
+$('fields').addEventListener('change', (event) => {
+  const el = event.target;
+  if (!el.dataset || !el.dataset.field) return;
+  currentProject[el.dataset.field] = el.value;
+  if (el.tagName === 'SELECT') el.classList.toggle('unset', !el.value);
+  revalidate();
+  scheduleDraftSave();
+});
+
+// ── 叁 一览表 ─────────────────────────────────────────────
 
 function describePriceSource() {
   const text = {
-    excel: `单价与年租赁价值取自 Excel 一览表，未经系统重算。`,
-    computed: `单价已用第叁步的重算结果更新。`,
-    manual: `单价经人工调整。`,
+    empty:    '单价还没算——到第伍步选实例、重算，再「用此结果更新一览表」。',
+    excel:    '单价与年租赁价值取自 Excel 一览表，未经系统重算。',
+    computed: '单价已用第伍步的重算结果更新。',
+    manual:   '单价经人工调整。',
   }[priceOrigin];
-  $('priceSource').innerHTML =
-    `${text}<br>单价可直接改（金样里农用把 1399.26 取整成 1400 才写进报告——取整与否是你的判断），` +
-    `改完年租赁价值自动跟算。`;
+  $('priceSource').innerHTML = `${esc(text)}<br>单价可直接改` +
+    `（金样里农用把 1399.26 取整成 1400 才写进报告——取整与否是你的判断），改完年租赁价值自动跟算。`;
 }
 
 function renderSubjects() {
-  if (!currentProject) return;
   const rows = currentProject.subjects.map((s, i) => `
     <tr>
       <td class="idx">${s.index}</td>
-      <td>${s.address}</td>
-      <td class="num">${s.area.toLocaleString()}</td>
-      <td class="price-cell">
-        <input type="text" class="priceInput" data-row="${i}" value="${s.unit_price}">
-      </td>
-      <td class="num" data-annual="${i}">${s.annual_value.toLocaleString()}</td>
+      <td><input type="text" data-sub="${i}" data-key="owner" value="${esc(s.owner)}" placeholder="权利人"></td>
+      <td><input type="text" data-sub="${i}" data-key="address" value="${esc(s.address)}" placeholder="坐落"></td>
+      <td><input type="text" data-sub="${i}" data-key="usage" value="${esc(s.usage)}" placeholder="用途"></td>
+      <td><input type="text" class="num" data-sub="${i}" data-key="area" value="${s.area || ''}"></td>
+      <td><input type="text" class="num" data-sub="${i}" data-key="unit_price" value="${s.unit_price || ''}"></td>
+      <td class="num" data-annual="${i}">${(s.annual_value || 0).toLocaleString()}</td>
+      <td><button type="button" class="mini" data-drop-sub="${i}"
+          ${currentProject.subjects.length === 1 ? 'disabled' : ''}>×</button></td>
     </tr>`).join('');
-  const totalArea = currentProject.subjects.reduce((sum, s) => sum + s.area, 0);
-  const totalValue = currentProject.subjects.reduce((sum, s) => sum + s.annual_value, 0);
+  const totalArea = currentProject.subjects.reduce((sum, s) => sum + (s.area || 0), 0);
+  const totalValue = currentProject.subjects.reduce((sum, s) => sum + (s.annual_value || 0), 0);
   $('subjects').innerHTML = `
     <thead><tr>
-      <th>序号</th><th>坐落</th>
-      <th class="num">面积（${areaUnit}）</th>
-      <th class="num">单价（${priceUnit}）</th>
-      <th class="num">年租赁价值（元）</th>
+      <th>序号</th><th>权利人</th><th>坐落</th><th>用途</th>
+      <th class="num">面积（${esc(areaUnit)}）</th>
+      <th class="num">单价（${esc(priceUnit)}）</th>
+      <th class="num">年租赁价值（元）</th><th></th>
     </tr></thead>
     <tbody>${rows}</tbody>
     <tfoot><tr>
-      <td></td><td>合计</td>
+      <td></td><td colspan="3">合计</td>
       <td class="num">${totalArea.toLocaleString()}</td><td></td>
-      <td class="num">${totalValue.toLocaleString()}</td>
+      <td class="num">${totalValue.toLocaleString()}</td><td></td>
     </tr></tfoot>`;
   describePriceSource();
 }
 
 /**
- * 单价变了 → 问后端要年租赁价值。
+ * 单价或面积变了 → 问后端要年租赁价值。
  *
  * 公式（农用 面积×单价、房屋类 ROUND(面积×单价×365,0)）只在 Python 里实现
- * 一次；这里照抄一份到 JS 就是第二个实现，迟早两边算出两个数。宁可多一次
- * 本机请求。
+ * 一次；照抄一份到 JS 就是第二个实现，迟早两边算出两个数。宁可多一次本机请求。
  */
 async function refreshAnnualValues() {
   if (!currentProject) return;
   const response = await fetch('/api/annual-values', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       category: currentProject.category,
-      subjects: currentProject.subjects.map((s) => ({ area: s.area, unit_price: s.unit_price })),
+      subjects: currentProject.subjects.map((s) => ({ area: s.area || 0, unit_price: s.unit_price || 0 })),
     }),
   });
   if (!response.ok) return;
@@ -385,18 +742,81 @@ async function refreshAnnualValues() {
 }
 
 $('subjects').addEventListener('change', async (event) => {
-  const input = event.target;
-  if (!input.classList || !input.classList.contains('priceInput')) return;
-  const value = Number(input.value);
-  if (!Number.isFinite(value)) { renderSubjects(); return; }
-  currentProject.subjects[Number(input.dataset.row)].unit_price = value;
-  priceOrigin = 'manual';
-  await refreshAnnualValues();
+  const el = event.target;
+  if (!el.dataset || el.dataset.sub === undefined) return;
+  const subject = currentProject.subjects[Number(el.dataset.sub)];
+  const key = el.dataset.key;
+  if (key === 'area' || key === 'unit_price') {
+    const value = Number(el.value);
+    if (!Number.isFinite(value)) { renderSubjects(); return; }
+    subject[key] = value;
+    if (key === 'unit_price') priceOrigin = 'manual';
+    await refreshAnnualValues();
+  } else {
+    subject[key] = el.value;
+  }
+  revalidate();
+  scheduleDraftSave();
 });
 
-// ── 实例与重算 ────────────────────────────────────────────
+$('subjects').addEventListener('click', (event) => {
+  const el = event.target;
+  if (!(el instanceof HTMLElement) || el.dataset.dropSub === undefined) return;
+  currentProject.subjects.splice(Number(el.dataset.dropSub), 1);
+  currentProject.subjects.forEach((s, i) => { s.index = i + 1; });
+  renderSubjects();
+  revalidate();
+  scheduleDraftSave();
+});
 
-/** 从实例区的真实 DOM 读当前值——不是快照，每次调用都取最新填写。 */
+$('addSubject').addEventListener('click', () => {
+  currentProject.subjects.push(EMPTY_SUBJECT(currentProject.subjects.length + 1));
+  renderSubjects();
+  scheduleDraftSave();
+});
+
+/**
+ * 校验只提示、不阻断。**不替他填，但替他核**——比如规模字段写 723.69 而
+ * 一览表面积合计是 732.69，报告里就有两个互相打架的数。
+ */
+async function revalidate() {
+  if (!currentProject) return;
+  const r = await fetch('/api/validate', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project: currentProject }),
+  });
+  if (!r.ok) return;
+  const { warnings } = await r.json();
+  $('warnings').innerHTML = warnings.map((w) => `<div class="warn">${esc(w.message)}</div>`).join('');
+}
+
+// ── 肆 因素档次 ───────────────────────────────────────────
+
+function renderFactors() {
+  $('factors').innerHTML = factors.map((f, i) => {
+    const picked = subjectLevels[f.名称] || '';
+    return `<div class="factor${picked ? '' : ' unset'}" data-factor="${i}">
+      <label><span>${esc(f.名称)}</span><span class="coef">每差1档 ${f.系数}</span></label>
+      <select data-level="${esc(f.名称)}" class="${picked ? '' : 'unset'}">
+        <option value="">请选择…</option>
+        ${f.档次.map((lv) => `<option${lv.描述 === picked ? ' selected' : ''} value="${esc(lv.描述)}">${esc(lv.描述)}</option>`).join('')}
+      </select>
+    </div>`;
+  }).join('');
+}
+
+$('factors').addEventListener('change', (event) => {
+  const el = event.target;
+  if (!el.dataset || !el.dataset.level) return;
+  if (el.value) subjectLevels[el.dataset.level] = el.value;
+  else delete subjectLevels[el.dataset.level];
+  el.classList.toggle('unset', !el.value);
+  el.closest('.factor')?.classList.toggle('unset', !el.value);
+  scheduleDraftSave();
+});
+
+// ── 伍 选实例与重算 ───────────────────────────────────────
+
 function collectSelectedInstances() {
   return Array.from(document.querySelectorAll('#instList .instRow')).flatMap((row) => {
     const pick = row.querySelector('.instPick');
@@ -411,11 +831,12 @@ function collectSelectedInstances() {
   });
 }
 
+let instanceTotal = 0;
 function updateInstHint() {
   const selected = collectSelectedInstances();
   const filled = selected.filter((s) => s.市场状况指数 !== '').length;
   $('instHint').textContent =
-    `${currentInstanceCategory}类，共 ${currentInstanceTotal} 条 · 已选 ${selected.length}/3` +
+    `共 ${instanceTotal} 条 · 已选 ${selected.length}/3` +
     (selected.length ? ` · 已填指数 ${filled}/${selected.length}` : '');
   document.querySelectorAll('#instList .instRow').forEach((row) => {
     const pick = row.querySelector('.instPick');
@@ -426,40 +847,71 @@ function updateInstHint() {
   $('computeResult').hidden = true;
 }
 
-/** 把重算结果写进一览表与 currentProject——报告用的就是这份数据。 */
+async function loadInstances(category) {
+  const r = await fetch('/api/instances?category=' + encodeURIComponent(category));
+  if (!r.ok) return;
+  const { instances } = await r.json();
+  instanceTotal = instances.length;
+  $('computeBtn').disabled = false;
+  $('computeError').hidden = true;
+  $('computeResult').hidden = true;
+  $('instList').innerHTML = instances.length ? instances.map((i) => `
+    <div class="instRow">
+      <label class="instHead">
+        <input type="checkbox" class="instPick" value="${esc(i.编号)}">
+        <span>
+          <span class="instTitle">${esc(i.位置)}</span>
+          <div class="instMeta">
+            成交价 <span class="price">${i.成交价.toLocaleString()}</span> ${esc(priceUnit)} ·
+            租期 ${esc(i.租期原文)}
+            ${i.日期精度 !== '完整' ? `<span class="flag">⚠ 日期${esc(i.日期精度)}</span>` : ''}
+          </div>
+        </span>
+      </label>
+      <div class="instForm">
+        <label>市场状况指数 <input type="text" class="mktIdx" placeholder="必填"></label>
+        <label>判断依据 <input type="text" class="mktNote wide" placeholder="选填"></label>
+      </div>
+    </div>`).join('')
+    : `<div class="note">${esc(category)}类实例库还是空的。到「实例库」页手工录入，或从 Excel 批量导入。</div>`;
+  updateInstHint();
+}
+
+$('instList').addEventListener('input', updateInstHint);
+$('instList').addEventListener('change', updateInstHint);
+
 async function applyComputed(result) {
   currentProject.unit_price = result.评估结果;
   currentProject.dispersion = result.离散度;
   currentProject.subjects.forEach((s) => { s.unit_price = result.评估结果; });
   priceOrigin = 'computed';
   await refreshAnnualValues();
-  $('applyStatus').textContent = '已写入一览表，第伍步生成的报告即用此数。';
+  await revalidate();
+  scheduleDraftSave();
+  $('applyStatus').textContent = '已写入一览表，第柒步生成的报告即用此数。';
   $('applyStatus').className = 'status done';
-  markStep('review');
-  $('review').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  markStep('step-subjects');
+  $('step-subjects').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
-async function recomputeResult() {
+$('computeBtn').addEventListener('click', async () => {
   const btn = $('computeBtn');
   const errorEl = $('computeError');
   const resultEl = $('computeResult');
   errorEl.hidden = true;
-  errorEl.textContent = '';
   resultEl.hidden = true;
-  resultEl.innerHTML = '';
-
-  if (!currentXlsxFile) {
-    errorEl.textContent = '请先在第壹步选择 Excel 文件。';
-    errorEl.hidden = false;
-    return;
-  }
   btn.disabled = true;
   $('computeStatus').textContent = '计算中……';
   try {
-    const form = new FormData();
-    form.append('file', currentXlsxFile);
-    form.append('selected', JSON.stringify(collectSelectedInstances()));
-    const response = await fetch('/api/compute', { method: 'POST', body: form });
+    const response = await fetch('/api/compute', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        category: currentProject.category,
+        subject_levels: subjectLevels,
+        base_table: baseTable?.指纹,
+        selected: collectSelectedInstances(),
+      }),
+    });
     const body = await response.json();
     if (!response.ok) {
       // 400 的 detail 是刻意写的专业提示（如"未填市场状况指数——系统不推算、
@@ -473,18 +925,15 @@ async function recomputeResult() {
       <div class="figures">
         <div class="figure">
           <div class="k">评估结果</div>
-          <div class="v">${body.评估结果}<span class="u">${unit}</span></div>
+          <div class="v">${body.评估结果}<span class="u">${esc(unit)}</span></div>
         </div>
         <div class="figure minor">
           <div class="k">比准价格</div>
-          <div class="v">${body.比准价格.join(' / ')}<span class="u">${unit}</span></div>
+          <div class="v">${body.比准价格.join(' / ')}<span class="u">${esc(unit)}</span></div>
         </div>
-        <div class="figure minor">
-          <div class="k">离散度</div>
-          <div class="v">${body.离散度}</div>
-        </div>
+        <div class="figure minor"><div class="k">离散度</div><div class="v">${body.离散度}</div></div>
       </div>
-      ${(body.提示 || []).map(w => `<div class="warn">${w.message}</div>`).join('')}
+      ${(body.提示 || []).map((w) => `<div class="warn">${esc(w.message)}</div>`).join('')}
       <div class="actions">
         <button id="applyBtn" type="button" class="primary">用此结果更新一览表</button>
         <span class="status" id="applyStatus"></span>
@@ -498,52 +947,15 @@ async function recomputeResult() {
     btn.disabled = false;
     $('computeStatus').textContent = '';
   }
-}
+});
 
-async function loadInstances(category) {
-  const r = await fetch('/api/instances?category=' + encodeURIComponent(category));
-  if (!r.ok) return;
-  const { instances } = await r.json();
-  currentInstanceCategory = category;
-  currentInstanceTotal = instances.length;
-  $('instances').hidden = false;
-  $('computeBtn').disabled = false;
-  $('computeError').hidden = true;
-  $('computeResult').hidden = true;
-  $('instList').innerHTML = instances.map(i => `
-    <div class="instRow">
-      <label class="instHead">
-        <input type="checkbox" class="instPick" value="${i.编号}">
-        <span>
-          <span class="instTitle">${i.位置}</span>
-          <div class="instMeta">
-            <!-- 成交价与评估结果同单位（引擎正是拿它乘各项指数算出比准价格的）。
-                 光写「2.52 元」是缺口①同一个病：农用的 1410 与办公的 2.52 差 500 倍。 -->
-            成交价 <span class="price">${i.成交价.toLocaleString()}</span> ${priceUnit} ·
-            租期 ${i.租期原文}
-            ${i.日期精度 !== '完整' ? `<span class="flag">⚠ 日期${i.日期精度}</span>` : ''}
-          </div>
-        </span>
-      </label>
-      <div class="instForm">
-        <label>市场状况指数 <input type="text" class="mktIdx" placeholder="必填"></label>
-        <label>判断依据 <input type="text" class="mktNote wide" placeholder="选填"></label>
-      </div>
-    </div>`).join('');
-  updateInstHint();
-}
-
-$('instList').addEventListener('input', updateInstHint);
-$('instList').addEventListener('change', updateInstHint);
-$('computeBtn').addEventListener('click', recomputeResult);
-
-// ── 附件 ──────────────────────────────────────────────────
+// ── 陆 附件 ───────────────────────────────────────────────
 
 function renderFileList() {
   $('file-list').innerHTML = attachmentFiles.map((f, i) => `
     <li>
       <span class="ord">${i + 1}</span>
-      <span>${f.name}</span>
+      <span class="name">${esc(f.name)}</span>
       <button type="button" class="mini" data-action="up" data-index="${i}" ${i === 0 ? 'disabled' : ''}>↑</button>
       <button type="button" class="mini" data-action="down" data-index="${i}" ${i === attachmentFiles.length - 1 ? 'disabled' : ''}>↓</button>
       <button type="button" class="mini" data-action="remove" data-index="${i}">×</button>
@@ -570,58 +982,7 @@ $('attach-input').addEventListener('change', (event) => {
   renderFileList();
 });
 
-// ── ① 选 Excel ────────────────────────────────────────────
-
-// 类别由实勘表 A1 标题自动识别，不给改：它决定用哪份模板、列哪类实例，
-// 手改一个字（哪怕多个空格）就会在生成时炸掉，且不会重新拉实例列表。
-const FIELD_LABELS = {
-  report_no: '报告编号', client: '委托人', owner: '权利人',
-  address: '坐落', usage: '设定出租用途', value_date: '价值时点',
-};
-
-$('xlsx').addEventListener('change', async (event) => {
-  const file = event.target.files[0];
-  if (!file) return;
-  $('xlsx-status').textContent = '读取中……';
-  const form = new FormData();
-  form.append('file', file);
-  const response = await fetch('/api/extract', { method: 'POST', body: form });
-  if (!response.ok) {
-    $('xlsx-status').textContent = '读取失败：' + (await response.json()).detail;
-    $('xlsx-status').className = 'status';
-    return;
-  }
-  const body = await response.json();
-  currentProject = body.project;
-  currentXlsxFile = file;
-  priceUnit = body.单价单位;
-  areaUnit = body.面积单位;
-  priceOrigin = 'excel';
-
-  $('xlsx-status').textContent = file.name;
-  $('xlsx-status').className = 'status done';
-  $('masthead-id').innerHTML =
-    `<span class="chip chip-seal">${currentProject.category}类</span>
-     <span class="chip chip-no">${currentProject.report_no}</span>`;
-
-  ['review', 'attachments', 'generate-step'].forEach((id) => { $(id).hidden = false; });
-  $('generate').disabled = false;
-  $('generate-status').textContent = '';
-  $('generate-status').className = 'status';
-  $('warnings').innerHTML = body.warnings.map(w => `<div class="warn">${w.message}</div>`).join('');
-
-  $('fields').innerHTML = Object.entries(FIELD_LABELS).map(([k, label]) =>
-    `<div><label>${label}</label><input type="text" data-field="${k}" value="${currentProject[k] ?? ''}"></div>`).join('');
-  document.querySelectorAll('#fields input[data-field]').forEach((input) => {
-    input.addEventListener('input', () => { currentProject[input.dataset.field] = input.value; });
-  });
-
-  renderSubjects();
-  loadInstances(currentProject.category);
-  markStep('review');
-});
-
-// ── ⑤ 生成 ────────────────────────────────────────────────
+// ── 柒 生成 ───────────────────────────────────────────────
 
 $('generate').addEventListener('click', async () => {
   if (!currentProject) return;
@@ -632,7 +993,7 @@ $('generate').addEventListener('click', async () => {
   status.textContent = '生成中……';
   const form = new FormData();
   form.append('project', JSON.stringify(currentProject));
-  attachmentFiles.forEach(f => form.append('files', f));
+  attachmentFiles.forEach((f) => form.append('files', f));
   try {
     const response = await fetch('/api/render', { method: 'POST', body: form });
     if (!response.ok) {
@@ -641,9 +1002,8 @@ $('generate').addEventListener('click', async () => {
     }
     const blob = await response.blob();
     const disposition = response.headers.get('Content-Disposition') || '';
-    // 末尾的 i 不可省：Starlette 发的是小写 filename*=utf-8''…，
-    // 区分大小写的话 "utf-8''" 会被当成文件名的一部分，存出来的报告叫
-    // 「utf-8''正恒评报字[2026]第F071号.docx」。
+    // 末尾的 i 不可省：Starlette 发的是小写 filename*=utf-8''…，区分大小写的话
+    // "utf-8''" 会被当成文件名的一部分。
     const match = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
     const filename = match ? decodeURIComponent(match[1]) : '估价报告.docx';
     const url = URL.createObjectURL(blob);
@@ -658,4 +1018,195 @@ $('generate').addEventListener('click', async () => {
     button.disabled = false;
   }
 });
+
+// ── 实例库页 ──────────────────────────────────────────────
+
+async function loadLibrary() {
+  const category = $('libCategory').value;
+  const r = await fetch('/api/instances?category=' + encodeURIComponent(category));
+  if (!r.ok) return;
+  const { instances } = await r.json();
+  const unit = category === '农用' ? '元/亩·年' : '元/㎡·天';
+  $('libList').innerHTML = instances.length ? instances.map((i) => `
+    <li>
+      <span class="name"><strong>${esc(i.位置)}</strong>
+        <span class="hint" style="margin:0">　成交价 ${i.成交价.toLocaleString()} ${esc(unit)} ·
+        租期 ${esc(i.租期原文)}
+        ${i.日期精度 !== '完整' ? `<span class="flag">⚠ 日期${esc(i.日期精度)}</span>` : ''}</span>
+      </span>
+      <span class="ver">${esc(i.编号)}</span>
+    </li>`).join('') : `<li><span class="name hint">该类别还没有实例。</span></li>`;
+  $('libStatus').textContent = `${category}类，共 ${instances.length} 条`;
+  $('libStatus').className = 'status';
+}
+
+$('libCategory').addEventListener('change', () => { loadLibrary(); $('instFormPanel').hidden = true; });
+
+$('libXlsx').addEventListener('change', async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  event.target.value = '';
+  $('libStatus').textContent = '导入中……';
+  const form = new FormData();
+  form.append('file', file);
+  const r = await fetch('/api/import', { method: 'POST', body: form });
+  if (!r.ok) { $('libStatus').textContent = '导入失败：' + (await r.json()).detail; return; }
+  const { imported } = await r.json();
+  const added = await (await fetch('/api/library', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ instances: imported }),
+  })).json();
+  $('libStatus').textContent =
+    `新增 ${added.added} 条` + (added.skipped.length ? `，${added.skipped.length} 条已在库中未覆盖` : '');
+  $('libStatus').className = 'status done';
+  loadLibrary();
+});
+
+// 手工录入：实例自带 28 个因素档次，与估价对象同一套选项。
+const INST_FIELDS = [
+  { k: '位置', label: '位置', wide: true },
+  { k: '成交价', label: '成交价' },
+  { k: '面积', label: '面积' },
+  { k: '出租用途', label: '出租用途' },
+  { k: '交易情况', label: '交易情况' },
+  { k: '交易情况指数', label: '交易情况指数' },
+  { k: '租期原文', label: '租期原文', wide: true },
+  { k: '备注', label: '备注', wide: true },
+];
+let instDraft = {};
+let instLevels = {};
+
+$('newInstBtn').addEventListener('click', async () => {
+  const category = $('libCategory').value;
+  $('instError').hidden = true;
+  $('instSaveStatus').textContent = '';
+  try {
+    await loadFactors(category);
+  } catch (err) {
+    $('instError').textContent = err.message;
+    $('instError').hidden = false;
+    $('instFormPanel').hidden = false;
+    return;
+  }
+  const unit = category === '农用' ? '元/亩·年' : '元/㎡·天';
+  const areaU = category === '农用' ? '亩' : '㎡';
+  instDraft = { 交易情况: '正常', 交易情况指数: 100 };
+  instLevels = {};
+  $('instFields').innerHTML = INST_FIELDS.map((f) => {
+    const label = f.k === '成交价' ? `成交价（${unit}）` : f.k === '面积' ? `面积（${areaU}）` : f.label;
+    const ph = f.k === '租期原文' ? '如 2026.1.15-2026.7.14；只知年月就写 2025.7-2026.7，不必编日期' : '';
+    return `<div class="cell${f.wide ? ' wide' : ''}">
+      <label>${esc(label)}</label>
+      <input type="text" data-inst="${esc(f.k)}" value="${esc(instDraft[f.k] ?? '')}" placeholder="${esc(ph)}">
+    </div>`;
+  }).join('');
+  $('instLevelsHint').textContent =
+    `${factors.length} 项 · 基础表 ${baseTable?.指纹 || '?'} · 与估价对象同一套选项`;
+  $('instFactors').innerHTML = factors.map((f) => `
+    <div class="factor unset">
+      <label><span>${esc(f.名称)}</span><span class="coef">每差1档 ${f.系数}</span></label>
+      <select data-instlevel="${esc(f.名称)}" class="unset">
+        <option value="">请选择…</option>
+        ${f.档次.map((lv) => `<option value="${esc(lv.描述)}">${esc(lv.描述)}</option>`).join('')}
+      </select>
+    </div>`).join('');
+  $('instFormPanel').hidden = false;
+  $('instFormPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+
+$('instFields').addEventListener('input', (event) => {
+  const el = event.target;
+  if (el.dataset && el.dataset.inst) instDraft[el.dataset.inst] = el.value;
+});
+$('instFactors').addEventListener('change', (event) => {
+  const el = event.target;
+  if (!el.dataset || !el.dataset.instlevel) return;
+  if (el.value) instLevels[el.dataset.instlevel] = el.value;
+  else delete instLevels[el.dataset.instlevel];
+  el.classList.toggle('unset', !el.value);
+  el.closest('.factor')?.classList.toggle('unset', !el.value);
+});
+
+$('cancelInstBtn').addEventListener('click', () => { $('instFormPanel').hidden = true; });
+
+$('saveInstBtn').addEventListener('click', async () => {
+  $('instError').hidden = true;
+  const payload = {
+    类别: $('libCategory').value,
+    位置: instDraft.位置 || '',
+    成交价: Number(instDraft.成交价) || 0,
+    面积: Number(instDraft.面积) || 0,
+    出租用途: instDraft.出租用途 || '',
+    交易情况: instDraft.交易情况 || '',
+    交易情况指数: Number(instDraft.交易情况指数) || 100,
+    租期原文: instDraft.租期原文 || '',
+    因素档次: instLevels,
+    备注: instDraft.备注 || '',
+  };
+  const r = await fetch('/api/instances', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  });
+  const body = await r.json();
+  if (!r.ok) { $('instError').textContent = body.detail; $('instError').hidden = false; return; }
+  const inst = body.instance;
+  if (!body.added) {
+    $('instSaveStatus').textContent = '';
+    $('instError').textContent =
+      `编号「${inst.编号}」已在库中，未覆盖。同位置同起始月多半是重复录入——请核对。`;
+    $('instError').hidden = false;
+    return;
+  }
+  $('instSaveStatus').textContent =
+    `已存入：${inst.编号}` + (inst.日期精度 !== '完整' ? `（日期${inst.日期精度}，已标记）` : '');
+  $('instSaveStatus').className = 'status done';
+  $('instFormPanel').hidden = true;
+  loadLibrary();
+});
+
+// ── 基础表页 ──────────────────────────────────────────────
+
+async function loadBaseVersions() {
+  const category = $('baseCategory').value;
+  const r = await fetch('/api/base-tables?category=' + encodeURIComponent(category));
+  if (!r.ok) return;
+  const { versions, current } = await r.json();
+  $('baseVersions').innerHTML = versions.length ? `
+    <thead><tr><th>版本（内容指纹）</th><th>导入时间</th><th>来源文件</th><th></th></tr></thead>
+    <tbody>${versions.map((v) => `
+      <tr>
+        <td class="ver">${esc(v.指纹)}</td>
+        <td class="num">${esc(v.导入时间.slice(0, 16).replace('T', ' '))}</td>
+        <td>${esc(v.来源文件名)}</td>
+        <td>${v.指纹 === current?.指纹 ? '<span class="chip chip-seal">当前</span>' : ''}</td>
+      </tr>`).join('')}</tbody>` : '';
+  $('baseStatus').textContent = versions.length
+    ? `${category}类，共 ${versions.length} 版`
+    : `${category}类还没有导入过基础表`;
+  $('baseStatus').className = 'status';
+}
+
+$('baseCategory').addEventListener('change', loadBaseVersions);
+
+$('baseXlsx').addEventListener('change', async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  event.target.value = '';
+  $('baseStatus').textContent = '导入中……';
+  const form = new FormData();
+  form.append('file', file);
+  const r = await fetch('/api/base-tables', { method: 'POST', body: form });
+  if (!r.ok) { $('baseStatus').textContent = '导入失败：' + (await r.json()).detail; return; }
+  const body = await r.json();
+  $('baseCategory').value = body.base_table.类别;
+  // 先刷版本表，再写提示——loadBaseVersions 自己也写 baseStatus，
+  // 顺序反了的话「未新增版本」这句会被它当场盖掉，估价师根本看不见。
+  await loadBaseVersions();
+  $('baseStatus').textContent = body.是否新版
+    ? `已导入新版本 ${body.base_table.指纹}（${body.base_table.类别}类）`
+    : `内容与 ${body.base_table.指纹} 相同，未新增版本——基础表没改过`;
+  $('baseStatus').className = 'status done';
+});
+
+// ── 启动 ──────────────────────────────────────────────────
+loadDraftList();
 </script>

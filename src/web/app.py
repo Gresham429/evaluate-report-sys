@@ -36,6 +36,7 @@ from src.knowledge_base.store import (
     VersionInfo,
 )
 from src.library.importer import import_from_excel
+from src.library.model import StoredInstance, make_id, parse_lease_start
 from src.library.store import DEFAULT_STORE_PATH, InstanceStore
 from src.model import Category, Project, Subject
 from src.prose.composer import area_unit, price_unit
@@ -240,6 +241,63 @@ def create_app() -> FastAPI:
         store.save()
         return {"added": added, "skipped": skipped}
 
+    @app.post("/api/instances")
+    def create_instance(payload: dict[str, Any]) -> dict[str, object]:
+        """手工录入一条比较实例。
+
+        表单落地后新实例也得能不开 Excel 就录进来，否则「输入不是 Excel」只
+        兑现了一半：出报告不用 Excel 了，录实例还得开 Excel。
+
+        **编号、起始日、日期精度由服务端派生**，不让界面自己算：`parse_lease_start`
+        认得出「2025.7-2026.7」是仅年月、「2025-2026」是仅年，这段正则有真逻辑
+        （见 `src/library/model.py` 的注释），抄一份进 JS 迟早两边解出两个日期。
+        日期不精确的照实打标记，不强制补全，不假造月份。
+        """
+        try:
+            category = Category(str(payload.get("类别", "")))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400, detail=f"未知类别：{payload.get('类别')!r}"
+            ) from exc
+        location = str(payload.get("位置", "")).strip()
+        if not location:
+            raise HTTPException(status_code=400, detail="位置不能为空——编号要用它")
+
+        raw_lease = str(payload.get("租期原文", ""))
+        start, precision = parse_lease_start(raw_lease)
+        levels = payload.get("因素档次")
+        try:
+            instance = StoredInstance(
+                编号=make_id(category, start, precision, location),
+                类别=category,
+                位置=location,
+                成交价=_to_float(payload.get("成交价")),
+                面积=_to_float(payload.get("面积")),
+                出租用途=str(payload.get("出租用途", "")),
+                交易情况=str(payload.get("交易情况", "")),
+                交易情况指数=_to_float(payload.get("交易情况指数")),
+                租期原文=raw_lease,
+                起始日=start,
+                日期精度=precision,
+                因素档次={str(k): str(v) for k, v in (levels or {}).items()}
+                if isinstance(levels, dict)
+                else {},
+                备注=str(payload.get("备注", "")),
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=f"实例数据不合法：{exc}") from exc
+
+        store = InstanceStore(_store_path())
+        store.load()
+        added = store.add(instance)
+        store.save()
+        return {
+            "instance": InstanceStore.to_dict(instance),
+            # 重复编号不覆盖——与 /api/library 一致。同位置同起始月的两条实例
+            # 会撞编号，那多半是重复录入，如实报告而不是静默顶掉已有的。
+            "added": added,
+        }
+
     @app.post("/api/compute")
     def compute(payload: dict[str, Any]) -> dict[str, object]:
         """选中的库内实例接入市场比较法引擎重算。
@@ -325,6 +383,23 @@ def create_app() -> FastAPI:
         except (KeyError, TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=f"面积或单价不是有效数字：{exc}") from exc
         return {"annual_values": values}
+
+    @app.post("/api/validate")
+    def validate_project(payload: dict[str, Any]) -> dict[str, object]:
+        """校验表单里的项目数据。**只提示，不阻断。**
+
+        表单路径没有源 Excel，故不查外部引用；其余各项与数据从哪来无关，照查。
+        19 项基本字段全部人工填、系统不拼凑（用户明确要求），但手填会手滑——
+        **不替他填，但替他核**。
+        """
+        raw = payload.get("project")
+        if not isinstance(raw, dict):
+            raise HTTPException(status_code=400, detail="project 字段缺失或格式错误")
+        try:
+            project = _project_from_payload(raw)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=f"项目数据解析失败：{exc}") from exc
+        return {"warnings": [asdict(w) for w in validate(project)]}
 
     @app.get("/api/drafts")
     def list_drafts() -> dict[str, object]:

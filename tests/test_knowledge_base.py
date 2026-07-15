@@ -17,7 +17,7 @@ import openpyxl
 import pytest
 
 from src.engine.knowledge import BASE_SHEET, Factor, Knowledge, extract_knowledge
-from src.knowledge_base import BaseTableStore, fingerprint
+from src.knowledge_base import BaseTableStore, canonical_form, fingerprint
 from src.model import Category
 from tests.conftest import CASES
 
@@ -106,9 +106,44 @@ def test_fingerprint_format() -> None:
 
 @pytest.mark.parametrize("case", ["农用", "办公", "商业"])
 def test_fingerprint_is_deterministic(case: str) -> None:
-    """同一份 Excel 算十次必须同值——否则每次导入都成「新版本」。"""
+    """同一份 Excel 算十次必须同值——否则每次导入都成「新版本」。
+
+    这条测不出多少东西（同进程内 dict 插入顺序必然相同，去掉 sort_keys 它照样
+    绿），真正钉住确定性的是下面的 `test_fingerprint_ignores_level_order` 与
+    `test_fingerprints_of_real_excels`。留着它是因为它把「导十次必须同值」这个
+    要求写在了明面上。
+    """
     got = {fingerprint(extract_knowledge(CASES[case])) for _ in range(10)}
     assert len(got) == 1
+
+
+def test_fingerprint_ignores_level_order() -> None:
+    """档次字典的插入顺序不得影响指纹——`sort_keys` 的守卫。
+
+    这才是能红的那个：去掉 canonical_form 里的 sort_keys，本测立刻失败。
+    档次是「描述→分值」的映射，其在 dict 里的先后不是知识。
+    """
+    forward = Factor(row=3, name="临街状况", levels={"四面临街": 2, "无临街": -2}, coefficient=1.0)
+    reverse = Factor(row=3, name="临街状况", levels={"无临街": -2, "四面临街": 2}, coefficient=1.0)
+    assert forward.levels != reverse.levels or list(forward.levels) != list(reverse.levels)
+    assert fingerprint(Knowledge((forward,), _SCORES)) == fingerprint(
+        Knowledge((reverse,), _SCORES)
+    )
+
+
+def test_canonical_form_is_stable_and_sorted() -> None:
+    """规范串是指纹的唯一输入，也是「什么算估价知识」的落地处，钉一次字符串。
+
+    它必须不含行号，且档次按键排序。
+    """
+    got = canonical_form(Knowledge((_factor(7),), _SCORES))
+    assert got == (
+        '{"分值标尺":[2,1,0,-1,-2],'
+        '"因素":[{"名称":"重要场所距离",'
+        '"档次":{"距区域中心距离＜1KM":2,"距区域中心距离＞2.5KM":-2},'
+        '"系数":"1.0"}]}'
+    )
+    assert "行号" not in got and "7" not in got
 
 
 def test_row_is_not_part_of_fingerprint() -> None:
@@ -260,6 +295,59 @@ def test_reimport_same_excel_is_not_a_new_version(tmp_path: Path) -> None:
     assert len(ledger) == 1
 
 
+def test_reimport_restores_a_deleted_version_file(tmp_path: Path) -> None:
+    """版本文件被误删后，重导同一份 Excel 必须能把它救回来。
+
+    手里还攥着源头 Excel 却救不回旧版本，直接打在「能复现」上；而重导同一份
+    Excel 正是估价师唯一会想到的自救动作。指纹命中只查台账不查文件的话，这里
+    会返回「已在库中」却不补文件，该版本从此永久取不出。
+    """
+    store = BaseTableStore(tmp_path)
+    first = store.import_from_excel(CASES["办公"], now=datetime(2026, 3, 1, 9, 0))
+    target = tmp_path / f"办公-{first.版本.指纹}.json"
+    target.unlink()
+
+    again = store.import_from_excel(CASES["办公"], now=datetime(2026, 9, 1, 9, 0))
+    assert target.exists(), "文件没了却不补，该版本永久取不出"
+    assert store.load(Category.OFFICE, first.版本.指纹) == extract_knowledge(CASES["办公"])
+    # 补文件不等于新版本：这版何时进的库是既成事实，不该被一次修复改写成今天。
+    assert again.是否新版 is False
+    assert again.版本.导入时间 == datetime(2026, 3, 1, 9, 0)
+    assert len(json.loads((tmp_path / "台账.json").read_text(encoding="utf-8"))) == 1
+
+
+def test_load_rejects_a_tampered_version_file(tmp_path: Path) -> None:
+    """版本文件被手改过 → load 必须报错，不得静默返回改过的知识。
+
+    文件是人类可读可手改的 JSON，手改迟早发生。而「拿 v1 重算 2026-03 那份报告」
+    若静默用上改过的系数，算出的是另一个数且无人察觉——正是本模块要防的事故。
+    """
+    store = BaseTableStore(tmp_path)
+    result = store.import_from_excel(CASES["办公"], now=datetime(2026, 7, 16, 10, 0))
+    target = tmp_path / f"办公-{result.版本.指纹}.json"
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    payload["因素"][0]["系数"] = 99.0  # 有人手痒改了个系数
+    target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="疑被改动"):
+        store.load(Category.OFFICE, result.版本.指纹)
+
+
+def test_load_tolerates_cosmetic_edits(tmp_path: Path) -> None:
+    """校验的是知识、不是字节：改缩进、调键序、把 1.0 写成 1 都不算改动。
+
+    否则「人类可读可手改」这条就名存实亡——格式化一下文件就再也读不出来了。
+    """
+    store = BaseTableStore(tmp_path)
+    result = store.import_from_excel(CASES["办公"], now=datetime(2026, 7, 16, 10, 0))
+    target = tmp_path / f"办公-{result.版本.指纹}.json"
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    payload["因素"][0]["系数"] = int(payload["因素"][0]["系数"])  # 1.0 → 1
+    target.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")  # 压成一行
+
+    assert store.load(Category.OFFICE, result.版本.指纹) == extract_knowledge(CASES["办公"])
+
+
 def test_reimport_does_not_rewrite_file(tmp_path: Path) -> None:
     """已存在的版本文件不得重写——不可变才谈得上可复现。
 
@@ -319,8 +407,8 @@ def test_version_info_records_source_and_time(tmp_path: Path) -> None:
     }
 
 
-def test_import_time_is_injectable(tmp_path: Path) -> None:
-    """不给 now 时用当前时间——但必须可注入，否则测试无从固定时间。"""
+def test_import_time_defaults_to_now(tmp_path: Path) -> None:
+    """不给 now 时取当前时间。（可注入性由上面固定时间的那些测试担着。）"""
     store = BaseTableStore(tmp_path)
     before = datetime.now()
     result = store.import_from_excel(CASES["办公"])
