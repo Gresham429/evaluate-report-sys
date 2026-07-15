@@ -67,3 +67,26 @@ def test_load_project_agricultural() -> None:
     assert project.is_land is True
     assert project.has_certificate is False
     assert len(project.subjects) == 1
+
+
+def test_coercion_excludes_bool() -> None:
+    """bool 是 int 子类，但复选框语义的 True 不该被当成数字 1。"""
+    from src.extractor.comparison import _as_float, _as_int
+
+    assert _as_int(True) == 0
+    assert _as_float(True) == 0.0
+    assert _as_int(5) == 5
+    assert _as_float(2.83) == 2.83
+
+
+def test_coercion_non_numeric_falls_back() -> None:
+    """非数值退化为默认值——报告里的 0 必须有日志可查。"""
+    from datetime import date
+
+    from src.extractor.comparison import _as_float, _as_int, _as_text
+
+    assert _as_int("abc") == 0
+    assert _as_float(date(2026, 1, 1)) == 0.0
+    assert _as_int(None) == 0
+    assert _as_text(None) == ""
+    assert _as_text("  甲  ") == "甲"

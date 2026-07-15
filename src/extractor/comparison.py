@@ -24,20 +24,26 @@ __all__ = ["extract_comparison", "extract_subjects"]
 
 
 def _as_float(value: object, default: float = 0.0) -> float:
-    """Excel 单元格值 → float。非数值（含 bool、日期、文本）一律取默认值。"""
+    """Excel 单元格值 → float。非数值（含 bool、日期、文本）退化为默认值并告警。"""
     if isinstance(value, bool):
+        logger.warning("单元格值为布尔 %r，非预期数值，退化为 %s", value, default)
         return default
     if isinstance(value, (int, float)):
         return float(value)
+    if value is not None:
+        logger.warning("单元格值 %r（类型 %s）非数值，退化为 %s", value, type(value).__name__, default)
     return default
 
 
 def _as_int(value: object, default: int = 0) -> int:
-    """Excel 单元格值 → int。非数值（含 bool、日期、文本）一律取默认值。"""
+    """Excel 单元格值 → int。非数值（含 bool、日期、文本）退化为默认值并告警。"""
     if isinstance(value, bool):
+        logger.warning("单元格值为布尔 %r，非预期数值，退化为 %s", value, default)
         return default
     if isinstance(value, (int, float)):
         return int(value)
+    if value is not None:
+        logger.warning("单元格值 %r（类型 %s）非数值，退化为 %s", value, type(value).__name__, default)
     return default
 
 
@@ -90,7 +96,7 @@ def extract_subjects(path: Path, category: Category) -> tuple[Subject, ...]:
     row = RESULT_FIRST_ROW
     while True:
         index = sheet.cell(row, RESULT_COLUMNS[0]).value
-        if not isinstance(index, (int, float)):
+        if isinstance(index, bool) or not isinstance(index, (int, float)):
             break
         values = [sheet.cell(row, col).value for col in RESULT_COLUMNS]
         subjects.append(
