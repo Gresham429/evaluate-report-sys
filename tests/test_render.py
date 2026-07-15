@@ -85,6 +85,13 @@ def _fake_office_project() -> Project:
     估价对象的门牌号），二者都已被正确参数化。若不伪造 project.address，
     真实地址会经由正确工作的 {{ address }} 合法出现在文本里，跟"模板里
     写死了金样数据"这个判定会混在一起，分不清是真泄漏还是没伪造到位。
+
+    scale 与 value_date 同理一并伪造（Task 12 fix2 新增）：二者都是与
+    subjects 相互独立的 Project 级字段——{{ scale }}/{{ value_date_cn }}
+    正确接线后会如实渲染 project.scale/project.value_date，若这里不伪造，
+    它们仍会渲染出金样自己的真实值（"房屋建筑面积723.69平方米…"、
+    "2026年3月26日"），把"占位符没接上"和"占位符接上了但没伪造完整"
+    这两种情况混在一起，测试就分辨不出到底是哪种。
     """
     from dataclasses import replace
 
@@ -96,6 +103,8 @@ def _fake_office_project() -> Project:
         owner="测试公司XYZ",
         report_no="正恒评报字[9999]第TEST号",
         address="测试地址999号",
+        scale="测试规模标记面积100.00平方米及其分摊的土地使用权",
+        value_date="2099-01-01",
         subjects=(
             Subject(
                 index=1, owner="测试公司XYZ", address="测试地址999室", usage="办公",
@@ -106,23 +115,19 @@ def _fake_office_project() -> Project:
 
 
 def test_template_has_no_hardcoded_golden_data(tmp_path: Path) -> None:
-    """用伪造数据渲染，金样的数字必须全部消失。
+    """用伪造数据渲染，金样的数字必须全部消失——含正文叙述句。
 
     这是唯一能发现「模板里写死了金样数据」的测试——所有拿金样自己的项目
     去渲染再跟金样比的测试（含金样回归）都验不出这类缺陷。
 
-    覆盖范围：Task 12 修复的「估价结果一览表」及两张摘要表的数据行，以及
-    随手一并修好的封面标题地址（同一 bug 类：SUBSTITUTIONS 原先对整份
-    document.xml 做一次性字符串替换，被 WPS 插入的空 <w:bookmarkStart>/
-    <w:bookmarkEnd> 打断成跨 run 短语的地方会静默替换失败）。
-
-    不在本次覆盖范围内、已确认另外存在、且仍会泄漏金样数字的 3 处，见
-    test_known_out_of_scope_golden_leaks()与 task-12-fix-report.md：
-    「实物状况/建筑规模」说明性文字表格（按类别措辞结构不同，需要新的
-    条件文案设计）、"估价范围"/"依据不足假设"两段里从未接上 {{ scale }}
-    占位符的面积描述、"年租赁价值为...元，大写：人民币...元整"一句里
-    同时硬编码的阿拉伯数字与中文大写金额（后者需要新增人民币大写转换
-    能力，本次改动未涉及）。
+    覆盖范围：Task 12 修复的「估价结果一览表」及两张摘要表的数据行、封面
+    标题地址（SUBSTITUTIONS 原先对整份 document.xml 做一次性字符串替换，
+    被 WPS 插入的空 <w:bookmarkStart>/<w:bookmarkEnd> 打断成跨 run 短语的
+    地方会静默替换失败），以及 Task 12 fix2 修复的四处正文叙述句写死金样
+    数据：估价范围/依据不足假设段的面积描述（{{ scale }}）、按对象枚举+
+    合计的建筑规模叙述句（{{ subjects_narrative }}）、年租赁价值金额与
+    大写金额（{{ total_value }}/{{ total_value_capital }}，见
+    src/prose/capital.py::to_capital）。
     """
     fake = _fake_office_project()
     output = tmp_path / "fake.docx"
@@ -136,35 +141,22 @@ def test_template_has_no_hardcoded_golden_data(tmp_path: Path) -> None:
     assert "111.11" in text
     assert "9.99" in text
     assert "405,147" in text
+    assert "肆拾万伍仟壹佰肆拾柒元整" in text
+    assert "测试规模标记面积100.00平方米及其分摊的土地使用权" in text
+    # {{ value_date_cn }} 正确接线的证据（段309：年租赁价值句前缀的日期）。
+    # 不把"2026年3月26日"整体列入下方禁止名单：value_date 与 survey_date
+    # 金样恰好同值，本任务范围外的其余段落（如"价值时点：…（实地查勘之日）"）
+    # 仍会字面显示 survey_date，那是另一处未纳入本次四处修复范围的既存
+    # 缺陷，与此处 value_date_cn 是否正确接线无关，不应混在一起断言。
+    assert "2099年1月1日" in text
 
-    # 金样数据必须彻底消失（一览表/摘要表数据行 + 封面标题地址）
-    for leaked in ("杭州萧山国有资产投资有限公司", "368030", "368,030",
-                   "379506", "379,506", "萧山区北干街道萧山科创中心3幢1206室",
-                   "萧山科创中心3幢1206室"):
-        assert leaked not in text, f"模板里残留金样数据：{leaked}"
-
-
-@pytest.mark.xfail(strict=True, reason="Task 12 范围外的既存缺陷，见 task-12-fix-report.md")
-def test_known_out_of_scope_golden_leaks(tmp_path: Path) -> None:
-    """记录 Task 12 验证过程中新发现、但明确不在本次修复范围内的金样泄漏。
-
-    用 xfail(strict=True) 而不是直接删除断言或默默放过：这些是真实存在的
-    「模板写死金样数据」缺陷，与 Task 12 同一 bug 类，但都需要新的条件
-    文案设计或新的中文大写金额转换能力，涉及未经用户确认的措辞/生成逻辑
-    决策，不应在本次改动中顺手臆造。保留为 xfail 让它们在测试套件里可见、
-    可追踪——一旦哪天被修好，这个测试会变成"意外通过"而失败，提醒把它
-    转成正式断言，而不是被无声遗忘。
-    """
-    fake = _fake_office_project()
-    output = tmp_path / "fake.docx"
-    render(fake, [], output)
-    text = "\n".join(extract_paragraphs_for_test(output))
+    # 金样数据必须彻底消失（一览表/摘要表数据行、封面标题地址、正文叙述句）
     for leaked in (
-        "356.29",  # 实物状况/建筑规模 表格：分室面积明细，按类别措辞结构不同
-        "367.4",
-        "723.69",  # 同上表格 + "估价范围"/"依据不足假设"两段（scale 从未接上占位符）
-        "萧山科创中心3幢1208室",  # 同上表格
-        "747536",  # "年租赁价值为...元，大写：..."句：阿拉伯数字+中文大写金额均硬编码
+        "杭州萧山国有资产投资有限公司", "368030", "368,030",
+        "379506", "379,506", "萧山区北干街道萧山科创中心3幢1206室",
+        "萧山科创中心3幢1206室", "萧山科创中心3幢1208室",
+        "356.29", "367.4", "723.69",
+        "747536", "747,536", "柒拾肆万柒仟伍佰叁拾陆元整",
     ):
         assert leaked not in text, f"模板里残留金样数据：{leaked}"
 
