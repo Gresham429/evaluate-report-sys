@@ -5,7 +5,6 @@
 当然能复现；验不出"界面选了实例，但压根没接进引擎"这种半成品。
 """
 
-import json
 import os
 from dataclasses import replace
 from pathlib import Path
@@ -14,6 +13,8 @@ import pytest
 from fastapi.testclient import TestClient
 from httpx2 import Response
 
+from src.engine.inputs import from_excel
+from src.knowledge_base.store import BaseTableStore
 from src.library.importer import import_from_excel
 from src.library.store import InstanceStore
 from src.web.app import create_app
@@ -30,7 +31,7 @@ OFFICE_MARKET_INDEX = {
 
 @pytest.fixture()
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    """已种好三类共 9 条种子实例的库。"""
+    """已种好三类共 9 条种子实例的库，与三类基础表。"""
     store_path = tmp_path / "库.json"
     store = InstanceStore(store_path)
     for case in ("农用", "办公", "商业"):
@@ -38,7 +39,22 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
             store.add(inst)
     store.save()
     monkeypatch.setenv("实例库路径", str(store_path))
+    monkeypatch.setenv("草稿目录", str(tmp_path / "草稿"))
+    monkeypatch.setenv("基础表目录", str(tmp_path / "基础表"))
+    # 基础表得先进库，/api/compute 才有知识可用——正是估价师首次使用时要做的事。
+    base = BaseTableStore(tmp_path / "基础表")
+    for case in ("农用", "办公", "商业"):
+        base.import_from_excel(CASES[case])
     return TestClient(create_app())
+
+
+def _office_levels() -> dict[str, str]:
+    """办公估价对象的 28 个因素档次。
+
+    表单路径由估价师逐个下拉框选出来；此处从金样 Excel 读，好让断言仍能对住
+    Excel 的 2.83——测的是引擎与接口，不是估价师的手速。
+    """
+    return from_excel(CASES["办公"]).subject_levels
 
 
 @pytest.fixture()
@@ -55,16 +71,15 @@ def _office_ids(client: TestClient) -> dict[str, str]:
 
 
 def _post_compute(client: TestClient, ids_by_location: dict[str, str]) -> Response:
+    """重算。**不传文件**——引擎要的三样来自请求、基础表库、表单的档次。"""
     selected = [
         {"编号": ids_by_location[loc], "市场状况指数": OFFICE_MARKET_INDEX[loc], "备注": ""}
         for loc in OFFICE_ORDER
     ]
-    with CASES["办公"].open("rb") as handle:
-        return client.post(
-            "/api/compute",
-            files={"file": ("办公实勘表、比较法.xlsx", handle, "application/vnd.ms-excel")},
-            data={"selected": json.dumps(selected, ensure_ascii=False)},
-        )
+    return client.post(
+        "/api/compute",
+        json={"category": "办公", "subject_levels": _office_levels(), "selected": selected},
+    )
 
 
 def test_compute_with_library_instances_reproduces_golden(client: TestClient) -> None:
@@ -118,12 +133,10 @@ def test_missing_market_index_rejected(client: TestClient) -> None:
         {"编号": ids[loc], "市场状况指数": "" if loc == OFFICE_ORDER[0] else OFFICE_MARKET_INDEX[loc], "备注": ""}
         for loc in OFFICE_ORDER
     ]
-    with CASES["办公"].open("rb") as handle:
-        response = client.post(
-            "/api/compute",
-            files={"file": ("办公实勘表、比较法.xlsx", handle, "application/vnd.ms-excel")},
-            data={"selected": json.dumps(selected, ensure_ascii=False)},
-        )
+    response = client.post(
+        "/api/compute",
+        json={"category": "办公", "subject_levels": _office_levels(), "selected": selected},
+    )
     assert response.status_code == 400
 
 
@@ -134,12 +147,10 @@ def test_wrong_selection_count_rejected(client: TestClient) -> None:
         {"编号": ids[OFFICE_ORDER[0]], "市场状况指数": OFFICE_MARKET_INDEX[OFFICE_ORDER[0]], "备注": ""},
         {"编号": ids[OFFICE_ORDER[1]], "市场状况指数": OFFICE_MARKET_INDEX[OFFICE_ORDER[1]], "备注": ""},
     ]
-    with CASES["办公"].open("rb") as handle:
-        response = client.post(
-            "/api/compute",
-            files={"file": ("办公实勘表、比较法.xlsx", handle, "application/vnd.ms-excel")},
-            data={"selected": json.dumps(selected, ensure_ascii=False)},
-        )
+    response = client.post(
+        "/api/compute",
+        json={"category": "办公", "subject_levels": _office_levels(), "selected": selected},
+    )
     assert response.status_code == 400
 
 
@@ -151,12 +162,10 @@ def test_unknown_id_rejected(client: TestClient) -> None:
         {"编号": ids[OFFICE_ORDER[1]], "市场状况指数": OFFICE_MARKET_INDEX[OFFICE_ORDER[1]], "备注": ""},
         {"编号": "这个编号不存在于库中", "市场状况指数": 95, "备注": ""},
     ]
-    with CASES["办公"].open("rb") as handle:
-        response = client.post(
-            "/api/compute",
-            files={"file": ("办公实勘表、比较法.xlsx", handle, "application/vnd.ms-excel")},
-            data={"selected": json.dumps(selected, ensure_ascii=False)},
-        )
+    response = client.post(
+        "/api/compute",
+        json={"category": "办公", "subject_levels": _office_levels(), "selected": selected},
+    )
     assert response.status_code == 400
 
 

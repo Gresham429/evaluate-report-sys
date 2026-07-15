@@ -13,6 +13,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from src.engine.inputs import from_excel
+from src.knowledge_base.store import BaseTableStore
 from src.library.importer import import_from_excel
 from src.library.store import InstanceStore
 from src.web.app import create_app
@@ -35,6 +37,11 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
             store.add(inst)
     store.save()
     monkeypatch.setenv("实例库路径", str(store_path))
+    monkeypatch.setenv("草稿目录", str(tmp_path / "草稿"))
+    monkeypatch.setenv("基础表目录", str(tmp_path / "基础表"))
+    base = BaseTableStore(tmp_path / "基础表")
+    for case in ("农用", "办公", "商业"):
+        base.import_from_excel(CASES[case])
     return TestClient(create_app())
 
 
@@ -45,21 +52,28 @@ def _extract(client: TestClient, case: str) -> dict:
     return response.json()["project"]
 
 
-def _compute_office(client: TestClient) -> dict:
-    items = client.get("/api/instances", params={"category": "办公"}).json()["instances"]
-    ids = {i["位置"]: i["编号"] for i in items}
+def _compute(client: TestClient, case: str, market_index: dict[str, float]) -> dict:
+    """重算。**不传文件**——档次从金样读出来当作「表单里填好的那份」。"""
+    category = {"办公": "办公", "农用": "农用", "商业": "商业"}[case]
+    items = client.get("/api/instances", params={"category": category}).json()["instances"]
     selected = [
-        {"编号": ids[loc], "市场状况指数": CHANGED_MARKET_INDEX[loc], "备注": ""}
-        for loc in OFFICE_ORDER
+        {"编号": i["编号"], "市场状况指数": market_index[i["位置"]], "备注": ""}
+        for i in items
     ]
-    with CASES["办公"].open("rb") as handle:
-        response = client.post(
-            "/api/compute",
-            files={"file": (CASES["办公"].name, handle)},
-            data={"selected": json.dumps(selected, ensure_ascii=False)},
-        )
+    response = client.post(
+        "/api/compute",
+        json={
+            "category": category,
+            "subject_levels": from_excel(CASES[case]).subject_levels,
+            "selected": selected,
+        },
+    )
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def _compute_office(client: TestClient) -> dict:
+    return _compute(client, "办公", CHANGED_MARKET_INDEX)
 
 
 def test_compute_reports_the_price_unit(client: TestClient) -> None:
@@ -69,15 +83,8 @@ def test_compute_reports_the_price_unit(client: TestClient) -> None:
 
 def test_compute_reports_agricultural_unit(client: TestClient) -> None:
     items = client.get("/api/instances", params={"category": "农用"}).json()["instances"]
-    selected = [{"编号": i["编号"], "市场状况指数": 100, "备注": ""} for i in items[:3]]
-    with CASES["农用"].open("rb") as handle:
-        response = client.post(
-            "/api/compute",
-            files={"file": (CASES["农用"].name, handle)},
-            data={"selected": json.dumps(selected, ensure_ascii=False)},
-        )
-    assert response.status_code == 200, response.text
-    assert response.json()["单价单位"] == "元/亩·年"
+    body = _compute(client, "农用", dict.fromkeys((i["位置"] for i in items), 100))
+    assert body["单价单位"] == "元/亩·年"
 
 
 def test_compute_flags_high_dispersion(client: TestClient) -> None:
@@ -95,18 +102,7 @@ def test_compute_flags_high_dispersion(client: TestClient) -> None:
 
 def test_compute_stays_quiet_when_dispersion_is_normal(client: TestClient) -> None:
     """实测办公原本的 98/95/95 离散度 5%，属正常——不该无端提示。"""
-    items = client.get("/api/instances", params={"category": "办公"}).json()["instances"]
-    ids = {i["位置"]: i["编号"] for i in items}
-    selected = [
-        {"编号": ids[loc], "市场状况指数": idx, "备注": ""}
-        for loc, idx in zip(OFFICE_ORDER, [98, 95, 95], strict=True)
-    ]
-    with CASES["办公"].open("rb") as handle:
-        body = client.post(
-            "/api/compute",
-            files={"file": (CASES["办公"].name, handle)},
-            data={"selected": json.dumps(selected, ensure_ascii=False)},
-        ).json()
+    body = _compute(client, "办公", dict(zip(OFFICE_ORDER, [98, 95, 95], strict=True)))
     assert body["评估结果"] == 2.83, "前提：这是金样那组指数"
     assert body["提示"] == []
 
