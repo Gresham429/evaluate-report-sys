@@ -23,6 +23,29 @@ logger = logging.getLogger(__name__)
 __all__ = ["extract_comparison", "extract_subjects"]
 
 
+def _as_float(value: object, default: float = 0.0) -> float:
+    """Excel 单元格值 → float。非数值（含 bool、日期、文本）一律取默认值。"""
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    return default
+
+
+def _as_int(value: object, default: int = 0) -> int:
+    """Excel 单元格值 → int。非数值（含 bool、日期、文本）一律取默认值。"""
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        return int(value)
+    return default
+
+
+def _as_text(value: object) -> str:
+    """Excel 单元格值 → 去空白的字符串。None 转空串。"""
+    return str(value).strip() if value is not None else ""
+
+
 def extract_comparison(path: Path, category: Category) -> dict[str, float]:
     """读比较法表的评估结果与离散度。
 
@@ -44,7 +67,7 @@ def extract_comparison(path: Path, category: Category) -> dict[str, float]:
     result: dict[str, float] = {}
     for field, cell in COMPARISON_FIELDS.items():
         value = sheet[cell].value
-        result[field] = float(value) if isinstance(value, (int, float)) else 0.0
+        result[field] = _as_float(value)
     return result
 
 
@@ -72,13 +95,13 @@ def extract_subjects(path: Path, category: Category) -> tuple[Subject, ...]:
         values = [sheet.cell(row, col).value for col in RESULT_COLUMNS]
         subjects.append(
             Subject(
-                index=int(values[0]),
-                owner=str(values[1] or "").strip(),
-                address=str(values[2] or "").strip(),
-                usage=str(values[3] or "").strip(),
-                area=float(values[4] or 0),
-                unit_price=float(values[5] or 0),
-                annual_value=int(values[6] or 0),
+                index=_as_int(values[0]),
+                owner=_as_text(values[1]),
+                address=_as_text(values[2]),
+                usage=_as_text(values[3]),
+                area=_as_float(values[4]),
+                unit_price=_as_float(values[5]),
+                annual_value=_as_int(values[6]),
             )
         )
         row += 1
