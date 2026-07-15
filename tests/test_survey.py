@@ -63,3 +63,33 @@ def test_value_date_converted(case: str, expected: str) -> None:
 def test_surveyor_extracted(case: str, expected: str) -> None:
     """现场查勘记录人员由估价师手工录入 D46。"""
     assert extract_survey(CASES[case])["surveyor"] == expected
+
+
+@pytest.mark.parametrize(
+    ("case", "expected"),
+    [
+        ("农用", "2026年4月20日至2026年4月27日"),
+        ("办公", "2026年3月26日至2026年4月7日"),
+        ("商业", "2026年3月25日至2026年4月1日"),
+    ],
+)
+def test_work_period_is_range_text(case: str, expected: str) -> None:
+    """估价作业期在 H4，是区间文本（F4 标签为「估价作业期」）。
+
+    早期版本把 H3/H4 写反，导致作业期取到日期序列号、印出「估价作业期：46139」。
+    坐标断言测不出这类语义错误——必须断言取出的真实值。
+    """
+    assert extract_survey(CASES[case])["work_period"] == expected
+
+
+@pytest.mark.parametrize(
+    ("case", "expected"),
+    [("农用", "2026-04-27"), ("办公", "2026-04-07"), ("商业", "2026-04-01")],
+)
+def test_issue_date_is_converted_serial(case: str, expected: str) -> None:
+    """估价报告出具日期在 H3，是日期序列号（F3 标签为「估价报告出具日期」）。
+
+    农用 46139→2026-04-27、商业 46113→2026-04-01 均与各自金样的
+    「估价报告出具日期」吻合，可佐证本映射。
+    """
+    assert extract_survey(CASES[case])["issue_date"] == expected

@@ -67,8 +67,10 @@ def test_survey_fields_complete() -> None:
         "current_status": "C16",
         "surveyor": "D46",
         "report_no": "H2",
-        "work_period": "H3",
-        "issue_date": "H4",
+        # 语义以 F 列标签为准：F3=估价报告出具日期(序列号)、F4=估价作业期(区间文本)。
+        # 见 tests/test_survey.py 的 test_work_period_is_range_text / test_issue_date_is_converted_serial。
+        "issue_date": "H3",
+        "work_period": "H4",
     }
 
 

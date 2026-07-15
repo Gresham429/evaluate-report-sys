@@ -6,6 +6,7 @@
 
 import logging
 from collections.abc import Sequence
+from datetime import date, timedelta
 from pathlib import Path
 
 from docx.shared import Mm
@@ -22,6 +23,33 @@ __all__ = ["build_context", "render", "DEFAULT_TEMPLATES_DIR", "ATTACHMENT_WIDTH
 
 DEFAULT_TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
 ATTACHMENT_WIDTH_MM = 160
+
+
+def _validity_end_cn(issue_date: str) -> str:
+    """报告使用有效期的截止日 = 出具日期 + 1 年 - 1 天，中文格式。
+
+    金样原文：「使用有效期限为从本报告出具之日起一年（2026年4月27日至
+    2027年4月26日止）」—— 截止日是次年同月同日的前一天，不是同一天。
+    该日期 Excel 里没有，须推算。
+
+    Args:
+        issue_date: 出具日期，ISO 格式（YYYY-MM-DD）。
+
+    Returns:
+        中文格式的截止日，如「2027年4月26日」。出具日期为空或不可解析时返回空串。
+    """
+    try:
+        issued = date.fromisoformat(issue_date)
+    except (ValueError, TypeError):
+        logger.warning("出具日期 %r 不可解析，无法推算有效期截止日", issue_date)
+        return ""
+    try:
+        anniversary = issued.replace(year=issued.year + 1)
+    except ValueError:
+        # 2月29日出具：次年无该日，取2月28日
+        anniversary = issued.replace(year=issued.year + 1, day=28)
+    end = anniversary - timedelta(days=1)
+    return f"{end.year}年{end.month}月{end.day}日"
 
 
 def _fmt(value: float) -> str:
@@ -111,6 +139,8 @@ def build_context(project: Project, pages: Sequence[AttachmentPage]) -> dict[str
         "current_status": project.current_status,
         "work_period": project.work_period,
         "issue_date": project.issue_date,
+        "issue_date_cn": _date_cn(project.issue_date),
+        "validity_end_cn": _validity_end_cn(project.issue_date),
         "unit_price": project.unit_price,
         "dispersion": project.dispersion,
         "subjects": [
