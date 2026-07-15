@@ -1,0 +1,26 @@
+# 案例素材与金样（约 100MB，本地保存，不入库）
+案例素材/
+tests/goldens/*.docx
+tests/goldens/*.xlsx
+
+# 环境
+.env
+
+# 构建产物
+dist/
+build/
+*.spec
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# SDD 工作区（brief / report / diff 等临时产物）
+.superpowers/
+
+# 系统
+.DS_Store
