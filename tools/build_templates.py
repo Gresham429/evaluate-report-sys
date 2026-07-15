@@ -48,6 +48,7 @@ from xml.sax.saxutils import escape, unescape
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.prose.drift import normalise  # noqa: E402
+from tools.table_loop import parameterize_subject_tables  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
@@ -186,6 +187,58 @@ def normalise_document_paragraphs(xml: str) -> str:
     return "".join(out)
 
 
+def _substitute_one_paragraph(para: str, subs: list[tuple[str, str]]) -> str:
+    """拼接段落内可见文本、整体做字面替换，再写回第一个 <w:t>。
+
+    SUBSTITUTIONS 原先直接对整份 document.xml 字符串做 str.replace()，
+    这对"目标短语在金样里跨 <w:r> 断开"的情形会静默失效——例如封面标题
+    的项目地址，WPS 在两个 run 之间插入了一对空的
+    <w:bookmarkStart>/<w:bookmarkEnd>（自动生成的 OLE_LINK 书签），
+    "萧山区北干街道萧山科创中心3幢1206室和3幢1208室"因此不是连续子串，
+    全文件替换找不到它，该处便原样留下金样的项目数据。
+
+    与 normalise_document_paragraphs()/_normalise_one_paragraph() 同一思路：
+    按段落拼接可见文本、整体做替换，再写回首个 <w:t>，其余 <w:t> 清空。
+    """
+    masked = _TXBX_RE.sub(lambda m: "\x00" * len(m.group(0)), para)
+    runs = list(_WT_RE.finditer(masked))
+    if not runs:
+        return para
+    original = "".join(unescape(r.group(1)) for r in runs)
+    replaced = original
+    for raw, placeholder in subs:
+        replaced = replaced.replace(raw, placeholder)
+    if replaced == original:
+        return para
+    pieces: list[str] = []
+    pos = 0
+    for i, run in enumerate(runs):
+        pieces.append(para[pos : run.start(1)])
+        pieces.append(escape(replaced) if i == 0 else "")
+        pos = run.end(1)
+    pieces.append(para[pos:])
+    return "".join(pieces)
+
+
+def substitute_document_paragraphs(xml: str, subs: list[tuple[str, str]]) -> str:
+    """按段落把 SUBSTITUTIONS 里的项目数据替换为 Jinja 占位符。
+
+    不用整份文件一次性 str.replace()：目标短语若被 WPS 的空标签（书签等）
+    跨 run 打断，全文件替换会对那一处静默失效，金样数据就在那处原样
+    留下（决定性证据见 tests/test_render.py 的
+    test_template_has_no_hardcoded_golden_data）。按段落重建可见文本再
+    整体替换可以处理这种情形。
+    """
+    out: list[str] = []
+    cursor = 0
+    for start, end in _iter_paragraph_spans(xml):
+        out.append(xml[cursor:start])
+        out.append(_substitute_one_paragraph(xml[start:end], subs))
+        cursor = end
+    out.append(xml[cursor:])
+    return "".join(out)
+
+
 def _strip_embedded_pictures(xml: str) -> str:
     """删除引用内嵌图片的 <w:drawing>/<w:pict>，保留不含图片的矢量骨架元素。
 
@@ -261,8 +314,8 @@ def build(tag: str, golden: Path, target: Path) -> None:
                 if name == "word/document.xml":
                     xml = data.decode("utf-8")
                     xml = normalise_document_paragraphs(xml)
-                    for raw, placeholder in SUBSTITUTIONS[tag]:
-                        xml = xml.replace(raw, placeholder)
+                    xml = substitute_document_paragraphs(xml, SUBSTITUTIONS[tag])
+                    xml = parameterize_subject_tables(xml)
                     xml = _strip_embedded_pictures(xml)
                     xml = _inject_attachment_loop(xml)
                     data = xml.encode("utf-8")

@@ -23,6 +23,24 @@ DEFAULT_TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
 ATTACHMENT_WIDTH_MM = 160
 
 
+def _fmt(value: float) -> str:
+    """数值 → 展示字符串。≥1000 加千分位，小数位原样保留。
+
+    估价报告里的金额与面积须加千分位以防看错位数（如 368030 误读成
+    36803 或 3680300）。整数值不补小数位——若与金样的小数写法（如
+    50.00）不一致，是已知的、经确认的格式改进，不做特殊处理。
+
+    Args:
+        value: 待格式化的数值。
+
+    Returns:
+        千分位格式化后的字符串。
+    """
+    if value == int(value):
+        return f"{int(value):,}"
+    return f"{value:,}"
+
+
 def build_context(project: Project, pages: Sequence[AttachmentPage]) -> dict[str, object]:
     """组装渲染上下文。
 
@@ -58,14 +76,14 @@ def build_context(project: Project, pages: Sequence[AttachmentPage]) -> dict[str
                 "owner": s.owner,
                 "address": s.address,
                 "usage": s.usage,
-                "area": s.area,
-                "unit_price": s.unit_price,
-                "annual_value": f"{s.annual_value:,}",
+                "area": _fmt(s.area),
+                "unit_price": _fmt(s.unit_price),
+                "annual_value": _fmt(s.annual_value),
             }
             for s in project.subjects
         ],
-        "total_area": sum(s.area for s in project.subjects),
-        "total_value": f"{sum(s.annual_value for s in project.subjects):,}",
+        "total_area": _fmt(sum(s.area for s in project.subjects)),
+        "total_value": _fmt(sum(s.annual_value for s in project.subjects)),
         "has_attachments": len(pages) > 0,
     }
     context.update(compose(project))

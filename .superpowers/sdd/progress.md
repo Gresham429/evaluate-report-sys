@@ -137,3 +137,24 @@ Task 15: complete (commit d00e4de) — 打包脚本与文档
 【待验】__main__.py 的包相对 import 在冻结包中未经验证（Mac 无法交叉编译测试）
 
 进度: 14/15 已提交，剩 Task 13 金样回归 + 代理1 的一览表参数化修复
+
+代理1 的一览表参数化修复: complete（见 .superpowers/sdd/task-12-fix-report.md，
+本地未纳入 git 版本控制，随 .superpowers/sdd/*-report.md 惯例）
+  - 估价结果一览表 + 两张摘要表的数据行改为 docxtpl `{%tr for/endfor %}` 行循环
+    （新增 tools/table_loop.py），行数随 subjects 实际长度变化，不再写死金样数字
+  - 决定性测试 test_template_has_no_hardcoded_golden_data（伪造数据渲染）验出
+    并顺手修复了同一 bug 类的第 4 处泄漏：封面标题地址被 WPS 空书签打断跨 run，
+    SUBSTITUTIONS 原来的整份文件 str.replace() 对这一处静默失效——已改为按段落
+    边界拼接文本再整体替换（复用 Task 11 已有技法）
+  ⚠️ 同批发现但未修（超出授权范围，需要设计确认）：
+     1. 「实物状况/建筑规模」说明性文字表格——按类别措辞结构不同（办公
+        "，...共计.."/商业"其中...、.."/农用无枚举），需要新条件文案设计
+     2. "估价范围"/"依据不足假设"两段的 scale 字段从未接上 {{ scale }} 占位符
+        （商业类措辞还多包一层"总建筑面积X平方米（...）"）
+     3. "年租赁价值为...元，大写：..."句同时硬编码阿拉伯数字与中文大写金额，
+        需要新增人民币大写转换能力（代码库目前没有此工具）
+     以上 3 处用 test_known_out_of_scope_golden_leaks（xfail strict）记录追踪
+  - 协调者中途批准追加需求：render.py build_context 新增 _fmt() 统一千分位
+    格式化（area/unit_price/annual_value/total_area/total_value），Task 13
+    金样回归会因此报数字不一致，是已确认的预期格式改进
+  当前全量: 123 passed + 1 xfailed，mypy clean（src 与 tools），ruff clean
