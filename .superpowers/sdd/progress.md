@@ -158,3 +158,20 @@ Task 15: complete (commit d00e4de) — 打包脚本与文档
     格式化（area/unit_price/annual_value/total_area/total_value），Task 13
     金样回归会因此报数字不一致，是已确认的预期格式改进
   当前全量: 123 passed + 1 xfailed，mypy clean（src 与 tools），ruff clean
+
+【P0 已解决】模板写死金样数据 —— 本项目最严重的缺陷
+  症状: 一览表与正文叙述句全是金样的死数据。任何项目生成的报告都会印着
+        金样那个项目的地址/面积/金额/金额大写。所有测试都通过——因为它们
+        全都拿金样自己的项目去渲染再跟金样比。
+  ⚠️ 控制者设计的验收判据（金样回归）根本验不出这类 bug。
+     唯一有效的是「用伪造数据渲染、断言金样数字必须消失」——这条测试
+     本该从一开始就在计划里。
+  修复链:
+    4cf08c1  三张表格参数化（{%tr for s in subjects %}）+ 封面标题跨 run 断裂
+    ddffdcc  正文叙述句 + 新建 src/prose/capital.py 数字转中文大写
+             （金额大写是法律上作准的那个，写死意味着每份报告都印金样的金额）
+    (本次)   农用/商业措辞不同的最后 4 处
+  ✅ 控制者独立验证: 三类伪造数据渲染，零金样残留
+  当前全量: 127 passed, mypy clean, ruff clean, 0 xfail
+
+进度: 14/15 —— 只剩 Task 13 金样回归
