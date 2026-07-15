@@ -33,3 +33,14 @@ Task 3: complete (commits 11f0175..13e4466, 规格✅ 质量批准 + 修复 Impo
   D: 8 (composer)  E: 11 (templates,单独) F: 12 (renderer)
   G: 13 (golden,单独) H: 14+15 (web+packaging)
 不做真并行：多个实现代理同时 git commit 必然撞 index.lock，收益抵不上 worktree 复杂度。
+
+Task 4: complete (commit a339fd9, 22 项测试) — 实勘表提取器
+Task 5: complete (commit 4cd3b9b + 修复 b2f562d, 10 项测试) — 比较法与一览表提取器
+  ✅ C1 铁律测试通过: test_agricultural_price_is_read_not_recomputed
+     （农用 K49=1400 手工取整值原样读，不被 T39=1399.26 覆盖）
+  - 修复 Important: comparison.py 的 int()/float() 未收窄 Cell.value 宽联合类型，
+    mypy 报 4 处 arg-type。这是计划代码的缺陷，非实现者问题。
+    → b2f562d 加 _as_int/_as_float/_as_text 辅助函数（显式排除 bool），mypy 归零
+  - 实现者自行加了 types-openpyxl 开发依赖（brief 外），加得对——正是它暴露了上述隐患
+  - 清除某代理擅建的 .superpowers/sdd/.gitignore（内容为 `*`，会威胁账本存续）
+  当前全量: 50 passed, mypy clean, ruff clean
