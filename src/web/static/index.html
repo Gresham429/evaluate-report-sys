@@ -7,6 +7,8 @@
   h1 { font-size: 1.4rem; }
   .step { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
   .warn { background: #fff8e1; border-left: 3px solid #f0a000; padding: .5rem .75rem; margin: .4rem 0; }
+  .err { background: #fdecea; border-left: 3px solid #d32f2f; padding: .5rem .75rem; margin: .4rem 0; }
+  .result { background: #eefaf0; border-left: 3px solid #2e9e5b; padding: .5rem .75rem; margin: .4rem 0; }
   label { display: block; margin: .5rem 0 .2rem; font-size: .85rem; color: #555; }
   input[type=text] { width: 100%; padding: .4rem; border: 1px solid #ccc; border-radius: 4px; }
   table { border-collapse: collapse; width: 100%; margin-top: .5rem; }
@@ -38,10 +40,17 @@
     ⓘ 按租期起始日从新到旧排列。系统不做可比性推荐——哪条更可比，由你的专业判断决定。<br>
     市场状况指数须逐条填写，系统不推算、不给默认值。
   </div>
+  <div style="margin-top:.75rem">
+    <button id="computeBtn" type="button" disabled>重算评估结果</button>
+    <span class="hint" id="computeStatus"></span>
+  </div>
+  <div class="err" id="computeError" hidden></div>
+  <div class="result" id="computeResult" hidden></div>
 </div>
 <script>
 let currentInstanceCategory = '';
 let currentInstanceTotal = 0;
+let currentXlsxFile = null; // ①选好的 xlsx 原始 File 对象，/api/compute 需要重传
 
 /** 从实例选择区的真实 DOM 读取当前值——不是快照，每次调用都取最新填写。 */
 function collectSelectedInstances() {
@@ -64,6 +73,56 @@ function updateInstHint() {
   document.getElementById('instHint').textContent =
     `（${currentInstanceCategory}类，共 ${currentInstanceTotal} 条 · 已选 ${selected.length}/3 条` +
     (selected.length ? `，已填市场状况指数 ${filled}/${selected.length}` : '') + `）`;
+  // 选择或填写变了，之前算出的结果已经过期——隐藏掉，逼用户重新点「重算」。
+  document.getElementById('computeError').hidden = true;
+  document.getElementById('computeResult').hidden = true;
+}
+
+/** 收集当前①选好的 xlsx + ③勾选的实例，调 /api/compute 重算并显示结果。 */
+async function recomputeResult() {
+  const btn = document.getElementById('computeBtn');
+  const statusEl = document.getElementById('computeStatus');
+  const errorEl = document.getElementById('computeError');
+  const resultEl = document.getElementById('computeResult');
+  errorEl.hidden = true;
+  errorEl.textContent = '';
+  resultEl.hidden = true;
+  resultEl.innerHTML = '';
+
+  if (!currentXlsxFile) {
+    errorEl.textContent = '请先在①选择 Excel 文件。';
+    errorEl.hidden = false;
+    return;
+  }
+  const selected = collectSelectedInstances();
+
+  btn.disabled = true;
+  statusEl.textContent = '计算中……';
+  try {
+    const form = new FormData();
+    form.append('file', currentXlsxFile);
+    form.append('selected', JSON.stringify(selected));
+    const response = await fetch('/api/compute', { method: 'POST', body: form });
+    const body = await response.json();
+    if (!response.ok) {
+      // 400 的 detail 是刻意写的专业提示（如"未填市场状况指数——系统不推算、
+      // 不给默认值"），必须原文展示给用户，不能吞掉或改写。
+      errorEl.textContent = body.detail;
+      errorEl.hidden = false;
+      return;
+    }
+    resultEl.innerHTML =
+      `<strong>比准价格</strong>：${body.比准价格.join(' / ')}<br>` +
+      `<strong>评估结果</strong>：${body.评估结果}<br>` +
+      `<strong>离散度</strong>：${body.离散度}`;
+    resultEl.hidden = false;
+  } catch (err) {
+    errorEl.textContent = '请求失败：' + err;
+    errorEl.hidden = false;
+  } finally {
+    btn.disabled = false;
+    statusEl.textContent = '';
+  }
 }
 
 async function loadInstances(category) {
@@ -73,6 +132,9 @@ async function loadInstances(category) {
   currentInstanceCategory = category;
   currentInstanceTotal = instances.length;
   document.getElementById('instances').hidden = false;
+  document.getElementById('computeBtn').disabled = false;
+  document.getElementById('computeError').hidden = true;
+  document.getElementById('computeResult').hidden = true;
   document.getElementById('instList').innerHTML = instances.map(i => `
     <div class="instRow" style="border-bottom:1px solid #eee;padding:.5rem 0">
       <label style="display:flex;gap:.5rem;align-items:baseline">
@@ -92,6 +154,7 @@ async function loadInstances(category) {
 
 document.getElementById('instList').addEventListener('input', updateInstHint);
 document.getElementById('instList').addEventListener('change', updateInstHint);
+document.getElementById('computeBtn').addEventListener('click', recomputeResult);
 </script>
 <div class="step" id="attachments" hidden>
   <strong>④ 挑附件、排序</strong>
@@ -152,6 +215,7 @@ document.getElementById('xlsx').addEventListener('change', async (event) => {
   if (!response.ok) { alert((await response.json()).detail); return; }
   const { project, warnings } = await response.json();
   currentProject = project;
+  currentXlsxFile = file; // /api/compute 要重传同一份 xlsx（读估价对象档次），留住 File 对象
   document.getElementById('review').hidden = false;
   document.getElementById('attachments').hidden = false;
   document.getElementById('generate-step').hidden = false;
