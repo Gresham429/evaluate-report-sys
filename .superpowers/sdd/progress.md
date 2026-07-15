@@ -81,3 +81,20 @@ Task 8: complete (commit 62fe86f, 10 项测试) — 条件组句器
   当前全量: 91 passed, mypy clean, ruff clean
 
 进度: 10/15 —— 下一步 Task 11 模板构建（第一个真风险点）
+
+Task 11: complete — 由金样构建三份模板（农用/办公/商业），python-docx 打开验证通过
+  模板体积: 农用 65,442B / 办公 68,077B / 商业 67,190B（均 <2MB 阈值，金样 24-40MB）
+  发现并修正 brief 骨架代码的三处问题（细节见 task-11-report.md，均未改 drift.py 规则）：
+    1. 图片剥离范围过宽——会连页眉司徽 logo 一起删，留悬空引用致 Word 报损坏。
+       改为只剥离 document.xml 引用的图片，保留页眉/页脚等骨架部件引用的媒体文件。
+    2. normalise() 直接作用于单行原始 XML——「序号点号」规则（权重15/25）的 ^ 锚点
+       失效，「方法别名」两条规则因目标短语跨 run 断开而不匹配。改为按 <w:p> 段落
+       边界拼接可见文本再整体归一化，与 Task 7 extract_copy.py 的既有做法一致。
+    3. normalise() 单遍扫描不收敛（商业金样"缺书名号"+"缺复印件"组合案例实测）。
+       调用方加定点迭代至收敛，不改规则本身。
+  遗留: drift.py「房屋安全」规则 pattern 与真实金样文本不匹配，25 处漂移点中唯一
+        未消除的一处（不在本任务范围，未改 drift.py）。无真实 Word/WPS 环境可用，
+        用 python-docx 打开+关系引用零悬空零孤儿+ElementTree 解析作代理验证。
+  当前全量: 104 passed, mypy clean, ruff clean
+
+进度: 11/15
