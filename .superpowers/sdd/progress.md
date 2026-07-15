@@ -50,3 +50,14 @@ Task 5: complete (commit 4cd3b9b + 修复 b2f562d, 10 项测试) — 比较法�
   - 修复 Important (27d895b): _as_float/_as_int 静默归零无日志。估价报告里的「0元/0㎡」
     看起来像正常数字，比报错更危险。已加 logger.warning（None 属正常空值不告警）。
     同时补 bool 分支单测、统一循环停止条件的 bool 口径。现 52 passed。
+
+Task 6: complete (commit e2df1be, 14 项测试) — 25 处漂移归一化规则
+Task 7: complete (commit 66a1081, 5 项测试) — 从金样抽取样板文字生成 copy.yaml
+  ✅ 归一化生效验证: len>12 口径下交集 43 → 63（净增 20 段法定套话）
+     控制者原设的「>112」门槛是错的（112 为不过滤口径），已修正 (6d1b7f2)
+  - copy.yaml: 63 段样板 + registered_appraisers[韩伟,胡柯] + 5 组条件文本
+  教训: 代理运行期间不要碰仓库文件——批次B 代理发现计划文件被神秘修改（实为控制者所为），
+        正确地拒绝将来源不明的改动入库。
+  当前全量: 71 passed, mypy clean, ruff clean
+
+进度: 7/15
