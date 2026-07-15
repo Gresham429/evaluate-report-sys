@@ -61,3 +61,14 @@ Task 7: complete (commit 66a1081, 5 项测试) — 从金样抽取样板文字�
   当前全量: 71 passed, mypy clean, ruff clean
 
 进度: 7/15
+
+Task 9:  complete (commit 57accea) — 数据校验器（只提示不阻断，6 项检查全部源自真实素材的坑）
+Task 10: complete (commit 见上) — 附件收集与 PDF 转图（PyMuPDF，非 pdf2image）
+  - 用户误触杀掉批次C 代理，Task 10 代码已写完但未提交；代理无法恢复，由控制者接手完成
+  - 发现并修复环境损坏: 代理加的 pymupdf-stubs 仅支持 Python>=3.12，与本项目
+    requires-python>=3.11 冲突，导致 uv 无法解析、所有命令罢工。
+    改为 [[tool.mypy.overrides]] ignore_missing_imports 显式接受 fitz 无存根。
+    取舍：类型存根是锦上添花，跨版本兼容是地基。
+  当前全量: 81 passed, mypy clean, ruff clean
+
+进度: 9/15
