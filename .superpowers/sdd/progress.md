@@ -44,3 +44,9 @@ Task 5: complete (commit 4cd3b9b + 修复 b2f562d, 10 项测试) — 比较法�
   - 实现者自行加了 types-openpyxl 开发依赖（brief 外），加得对——正是它暴露了上述隐患
   - 清除某代理擅建的 .superpowers/sdd/.gitignore（内容为 `*`，会威胁账本存续）
   当前全量: 50 passed, mypy clean, ruff clean
+  - 批次A审查: 规格✅ 质量批准。审查者独立打开真实 Excel 复核 C1，确认 K49=1400 与
+    T39=1399.26 被分别断言，反重算测试是真锁非摆设。grep 确认全仓 data_only=True，
+    无 formulas/eval 重算痕迹。
+  - 修复 Important (27d895b): _as_float/_as_int 静默归零无日志。估价报告里的「0元/0㎡」
+    看起来像正常数字，比报错更危险。已加 logger.warning（None 属正常空值不告警）。
+    同时补 bool 分支单测、统一循环停止条件的 bool 口径。现 52 passed。
