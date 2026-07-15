@@ -3,6 +3,8 @@
 import pytest
 
 from src.extractor.field_map import (
+    COMPARISON_FIELDS,
+    RESULT_COLUMNS,
     RESULT_FIRST_ROW,
     RESULT_HEADER_ROW,
     SURVEY_FIELDS,
@@ -45,14 +47,39 @@ def test_comparison_sheet_name() -> None:
     assert comparison_sheet_name(Category.COMMERCIAL) == "房地产比较法"
 
 
-def test_survey_fields_cover_spec() -> None:
-    assert SURVEY_FIELDS["report_no"] == "H2"
-    assert SURVEY_FIELDS["client"] == "C3"
-    assert SURVEY_FIELDS["certificate_status"] == "C10"
-    assert SURVEY_FIELDS["owner"] == "C11"
-    assert SURVEY_FIELDS["usage"] == "C13"
-    assert SURVEY_FIELDS["current_status"] == "C16"
-    assert SURVEY_FIELDS["surveyor"] == "D46"
+def test_survey_fields_complete() -> None:
+    """全部 19 个实勘表坐标。写错一个，提取出的报告数据就是错的。"""
+    assert SURVEY_FIELDS == {
+        "project_name": "C2",
+        "client": "C3",
+        "client_address": "C4",
+        "legal_rep": "C5",
+        "purpose": "C6",
+        "survey_date": "C7",
+        "value_date": "C8",
+        "materials": "C9",
+        "certificate_status": "C10",
+        "owner": "C11",
+        "address": "C12",
+        "usage": "C13",
+        "scale": "C14",
+        "scope": "C15",
+        "current_status": "C16",
+        "surveyor": "D46",
+        "report_no": "H2",
+        "work_period": "H3",
+        "issue_date": "H4",
+    }
+
+
+def test_comparison_fields_complete() -> None:
+    """比较法坐标。T39 是评估结果单价，X37 是比准价格离散度。"""
+    assert COMPARISON_FIELDS == {"unit_price": "T39", "dispersion": "X37"}
+
+
+def test_result_columns() -> None:
+    """一览表列序：序号, 权利人, 地址, 用途, 面积, 单价, 年租赁价值。"""
+    assert RESULT_COLUMNS == (6, 7, 8, 9, 10, 11, 12)
 
 
 def test_result_table_rows() -> None:
