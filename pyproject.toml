@@ -23,6 +23,7 @@ dev = [
     "types-openpyxl>=3.1.5.20260518",
     "types-pyyaml>=6.0.12.20260518",
     "httpx2>=2.7.0",
+    "pyinstaller>=6.21.0",
 ]
 
 [tool.pytest.ini_options]

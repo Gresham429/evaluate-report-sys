@@ -23,3 +23,25 @@ uv run pytest
 ## 验收标准
 
 金样回归：能用 `案例素材/` 下的三份 Excel 复现出三份报告。
+
+## 打包 Windows exe
+
+```bash
+uv run python build_exe.py
+```
+
+产物在 `dist/`：exe + 外置的 `templates/` 与 `copy.yaml`。
+
+> PyInstaller 不支持交叉编译，`build_exe.py` 必须在 **Windows 机器**上运行才能产出
+> `.exe`；在 macOS/Linux 上运行会产出对应平台的可执行文件，不是 Windows exe。
+
+## 交付形态
+
+```
+估价报告系统/
+├── 估价报告系统.exe      ← 双击，自动开浏览器
+├── templates/            ← 三份模板，可在 Word 里编辑
+└── copy.yaml             ← 法定套话，改一处三类同步
+```
+
+使用细节见 `docs/使用说明.md`。
