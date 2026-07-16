@@ -358,8 +358,15 @@ Pre-flight：
       改动面小（compute/replay/测试三处）、评审刚判过原版、控制者已核语义，
       合理跳过二次评审。这是「方法」字段栽的第二跤（第一次没进模型，这次进了没被用），
       两次都是规划锅，流程两次都在合并前挡住。
-- [ ] Task 6 生成报告时落台账        实施中，用 Task 4 补的台账目录兜底
-- [ ] Task 7 台账界面 + 导入警告
+- [x] Task 6 生成报告时落台账        完成（e5a326d），待评审。367 全绿。
+      实施者逮到 brief 两处真错：
+      ① 「方法」字段第三次候选事故——brief 的 _build_ledger_entry 又漏了 方法=
+         （我修计划配方时只改 replay，没回头补 Task 6）。grep 自查逮住，已带上。
+      ② **中文路径参数在 starlette 下永远 404**：{记录号} 被 PARAM_REGEX 当字面文本，
+         任何真实记录号都匹配不上，而落台账包在 try/except 里连报错都吞掉。改成
+         ASCII 的 record_id（仿 /api/drafts/{draft_id}），URL 形状不变。这是我写
+         计划时完全没意识到的。
+- [ ] Task 7 台账界面 + 导入警告      下一个（base e5a326d）
 - [ ] Task 8 文档
 
 ### Minor findings（留给最终整体评审分诊）
