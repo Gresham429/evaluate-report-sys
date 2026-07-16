@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from src.extractor.condition import SurveyCondition, read_survey_conditions
+from src.extractor.condition import read_survey_conditions
 
 MATERIALS = Path(__file__).resolve().parents[1].parent / "案例素材"
 OFFICE = MATERIALS / "办公" / "办公实勘表、比较法.xlsx"
