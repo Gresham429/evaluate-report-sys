@@ -15,7 +15,7 @@
 也出不来。
 
 用法：
-    uv run python tools/smoke_exe.py dist/估价报告系统.exe
+    uv run python tools/smoke_exe.py dist/appraisal-report-system.exe
 """
 
 import json

@@ -43,7 +43,7 @@
 
 ```bash
 uv sync
-uv run pytest          # 367 项
+uv run pytest          # 375 项
 uv run mypy src/
 uv run ruff check .
 uv run python -m src   # 起本地服务，自动开浏览器
@@ -75,7 +75,7 @@ Actions 页手动点 → 同上，只是不发 Release，包在 artifact 里
 
 ```bash
 uv run python build_exe.py
-uv run python tools/smoke_exe.py "dist/_package/估价报告系统/估价报告系统"
+uv run python tools/smoke_exe.py "dist/_package/appraisal-report-system/appraisal-report-system"
 ```
 
 **冒烟测试不是装饰。** 「编译通过」与「exe 能用」是两回事——冻结路径那个 bug
@@ -91,13 +91,18 @@ uv run python tools/smoke_exe.py "dist/_package/估价报告系统/估价报告�
 ### 交付包里放什么
 
 ```
-appraisal-report-system-windows.zip     ← 文件名只能用 ASCII，见 build_exe.py
-└── 估价报告系统/
-    ├── 估价报告系统.exe
-    ├── templates/        三份模板，可在 Word 里改
+appraisal-report-system-windows.zip     ← 交付名一律 ASCII，见 build_exe.py
+└── appraisal-report-system/             ← 内层目录名也 ASCII，防第三方解压软件按 GBK 解成乱码
+    ├── appraisal-report-system.exe
+    ├── templates/        farmland/office/commercial.docx，可在 Word 里改
     ├── copy.yaml         法定套话，改一处三类同步
     └── 使用说明.md
 ```
+
+> **为什么全是 ASCII**：中文文件名进交付会两头挨打——GitHub Release 删空非 ASCII 资产名；
+> 第三方中文解压软件（WinRAR/360/好压/2345）把 zip 里的中文条目名按 GBK 解成乱码，
+> `农用.docx` 变 `鍐滅敤.docx`，`render()` 便找不到模板、一份报告也出不来（v1.0.1 实测）。
+> 模板文件名与「类别值」解耦见 `src/renderer/render.py` 的 `TEMPLATE_FILENAMES`；类别值本身仍是中文，不动。
 
 **刻意不放 `data/`** ——那是估价师的实例库、草稿、基础表，程序首次运行时自建。
 塞进交付包的话，下次解压升级会把人家攒的实例库连同草稿一起盖掉：升级不该是
@@ -108,8 +113,8 @@ appraisal-report-system-windows.zip     ← 文件名只能用 ASCII，见 build
 首次运行后 `data/` 自动出现：
 
 ```
-估价报告系统/
-├── 估价报告系统.exe
+appraisal-report-system/
+├── appraisal-report-system.exe
 ├── templates/、copy.yaml
 └── data/                 ← 实例库、草稿、基础表各版本。纯 JSON，可直接看可备份
 ```

@@ -47,7 +47,9 @@ from xml.sax.saxutils import escape, unescape
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from src.model import Category  # noqa: E402
 from src.prose.drift import normalise  # noqa: E402
+from src.renderer.render import TEMPLATE_FILENAMES  # noqa: E402
 from tools.table_loop import parameterize_subject_tables  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -419,8 +421,10 @@ def main() -> int:
         logger.error("金样缺失：%s", missing)
         return 1
     TEMPLATES.mkdir(parents=True, exist_ok=True)
+    # 文件名走 render 的 ASCII 映射，不用中文 tag：中文名进交付 zip 会被第三方
+    # 解压软件解成乱码，render() 便找不到（见 render.TEMPLATE_FILENAMES 说明）。
     for tag, golden in GOLDENS.items():
-        build(tag, golden, TEMPLATES / f"{tag}.docx")
+        build(tag, golden, TEMPLATES / TEMPLATE_FILENAMES[Category(tag)])
     return 0
 
 
