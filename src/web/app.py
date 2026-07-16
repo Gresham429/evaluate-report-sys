@@ -218,12 +218,33 @@ def _safe_filename(name: str) -> str:
     return cleaned or "估价报告"
 
 
+def _asset_conditions_to_ledger(
+    groups: tuple[ConditionGroup, ...],
+) -> tuple[dict[str, object], ...]:
+    """把 `Project.asset_condition_groups` 序列化成台账「资产状况」字段的形状。
+
+    独立可选字段，跟「经引擎重算」无关（不参与六者同生同灭）——导入 Excel 直接
+    生成的报告一样可能带手写描述。空分组序列化为空元组而非 None：这里已经
+    过手组装过（哪怕结果为空），跟「压根没有这个字段」的旧台账不是一回事。
+    """
+    return tuple(
+        {
+            "组": g.name,
+            "因素": [{"名称": f.name, "描述": f.description} for f in g.factors],
+        }
+        for g in groups
+    )
+
+
 def _build_ledger_entry(project: Project, raw: dict[str, Any] | None) -> LedgerEntry:
     """按一次生成攒出台账记录。
 
     `raw` 为 None（或缺关键字段）即视为**未经系统重算**——导入 Excel 直接生成的
     老路正是如此。此时基础表/档次/实例/方法/权重/结果全为 None，`经引擎重算` 为 False。
     这不是缺失，恰恰是复核最想知道的事：这份报告的数字不是引擎算的。
+
+    `资产状况` 与上述六者无关，两条路径都照样序列化——描述只进报告、不进算术，
+    没有引擎重算也可以有手写描述。
     """
     一览表 = tuple(
         {
@@ -232,11 +253,13 @@ def _build_ledger_entry(project: Project, raw: dict[str, Any] | None) -> LedgerE
         }
         for s in project.subjects
     )
+    资产状况 = _asset_conditions_to_ledger(project.asset_condition_groups)
     if not raw or not raw.get("result"):
         return LedgerEntry.new(
             报告编号=project.report_no, 类别=project.category,
             基础表=None, 估价对象档次=None, 实例=None, 方法=None, 权重=None, 结果=None,
             一览表=一览表,
+            资产状况=资产状况,
         )
 
     category = Category(str(raw.get("category", project.category.value)))
@@ -289,6 +312,7 @@ def _build_ledger_entry(project: Project, raw: dict[str, Any] | None) -> LedgerE
             离散度=float(result_raw["离散度"]),
         ),
         一览表=一览表,
+        资产状况=资产状况,
     )
 
 
