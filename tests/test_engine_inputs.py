@@ -11,6 +11,7 @@ import pytest
 from src.engine.compute import compute_from_selection
 from src.engine.inputs import ComparisonInput, from_excel
 from src.engine.knowledge import Factor, Knowledge
+from src.engine.methods.base import Instance
 from src.library.importer import import_from_excel
 from src.library.store import InstanceStore
 from src.model import Category
@@ -116,3 +117,55 @@ def test_category_mismatch_still_caught(tmp_path) -> None:
     selections = [{"编号": i.编号, "市场状况指数": 100, "备注": ""} for i in land]
     with pytest.raises(ValueError, match="类别"):
         compute_from_selection(from_excel(CASES["办公"]), selections, store)
+
+
+def test_compute_needs_no_store(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """给现成的实例就该能算，不必先塞进一个库再取出来。
+
+    这是重放的地基：台账里的实例是快照，本来就不在库里，也不该为了算它而临时建库。
+    """
+    from src.engine.compute import compute, default_weights
+
+    store = _office_store(tmp_path)
+    source = from_excel(CASES["办公"])
+    instances = tuple(
+        Instance(
+            位置=i.位置,
+            成交价=i.成交价,
+            交易情况指数=i.交易情况指数,
+            市场状况指数=OFFICE_MARKET_INDEX[i.位置],
+            因素档次=dict(i.因素档次),
+        )
+        for i in store.list_by_category(Category.OFFICE)
+    )
+    result = compute(source, instances, default_weights())
+    assert result.评估结果 == OFFICE_GOLDEN
+
+
+def test_both_entry_points_agree(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """compute_from_selection 只是「取库 + 调 compute」，两者结果必须一致。"""
+    from src.engine.compute import compute, default_weights
+
+    store = _office_store(tmp_path)
+    source = from_excel(CASES["办公"])
+    via_store = compute_from_selection(source, _office_selections(store), store)
+    instances = tuple(
+        Instance(
+            位置=i.位置,
+            成交价=i.成交价,
+            交易情况指数=i.交易情况指数,
+            市场状况指数=OFFICE_MARKET_INDEX[i.位置],
+            因素档次=dict(i.因素档次),
+        )
+        for i in store.list_by_category(Category.OFFICE)
+    )
+    assert compute(source, instances, default_weights()) == via_store
+
+
+def test_default_weights_are_thirds() -> None:
+    """权重写死各 ⅓（用户决定）。台账要存它——哪天开放可调，重放必须用当时那组。"""
+    from src.engine.compute import default_weights
+
+    weights = default_weights()
+    assert len(weights) == 3
+    assert sum(weights) == pytest.approx(1.0, abs=0.001)

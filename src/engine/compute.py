@@ -22,7 +22,13 @@ from src.model import Category
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["compute_from_selection", "SELECTION_SIZE", "METHOD_NAME"]
+__all__ = [
+    "compute",
+    "compute_from_selection",
+    "default_weights",
+    "SELECTION_SIZE",
+    "METHOD_NAME",
+]
 
 METHOD_NAME = "市场比较法-2026"
 SPEC_FILENAME = "比较法-市场比较法-2026版.yaml"
@@ -81,6 +87,53 @@ def _resolve_instance(
     )
 
 
+def default_weights() -> tuple[float, ...]:
+    """本方法的默认权重。
+
+    现为各 ⅓（用户决定，本版不可调）。**台账要把它存下来**——哪天开放可调，
+    重放必须用当时那组，不能用今天的。
+    """
+    return load_spec(DEFAULT_SPEC_DIR / SPEC_FILENAME).weights
+
+
+def compute(
+    source: ComparisonInput,
+    instances: Sequence[Instance],
+    weights: Sequence[float],
+) -> Result:
+    """纯算：给定输入、现成的实例、权重，算出结果。**不碰实例库。**
+
+    与 `compute_from_selection` 的分工：那个负责「按编号从库里取实例、校类别、
+    解析市场状况指数」，本函数负责算。拆开是为了台账重放——快照里的实例本来就
+    不在库里，不该为了算它而临时建一个库。
+
+    Args:
+        source: 引擎输入（类别 + 基础表知识 + 估价对象档次）。
+        instances: 已配好市场状况指数的实例。
+        weights: 各实例权重，长度须与 instances 一致。
+
+    Returns:
+        Result（比准价格、评估结果、离散度）。
+
+    Raises:
+        ValueError: 档次不在基础表中、权重数量不匹配，或取值导致比准价格算出 0。
+    """
+    method = get_method(METHOD_NAME)
+    try:
+        result = method.compute(source.subject_levels, instances, source.knowledge, weights)
+    except ZeroDivisionError as exc:
+        # 市场状况指数填 0（或使某条比准价格算出 0）会让离散度公式除零——
+        # 这不是系统故障，是估价师填了个物理上不成立的指数，同样按 400 报告。
+        raise ValueError(
+            "市场状况指数或档次取值导致比准价格算出 0，无法计算离散度，请核对填写"
+        ) from exc
+    logger.info(
+        "算完：类别=%s 比准价格=%s 评估结果=%s 离散度=%s",
+        source.category.value, result.比准价格, result.评估结果, result.离散度,
+    )
+    return result
+
+
 def compute_from_selection(
     source: ComparisonInput,
     selections: Sequence[Mapping[str, object]],
@@ -110,18 +163,4 @@ def compute_from_selection(
     category = source.category
     instances = tuple(_resolve_instance(item, category, store) for item in selections)
 
-    spec = load_spec(DEFAULT_SPEC_DIR / SPEC_FILENAME)
-    method = get_method(METHOD_NAME)
-    try:
-        result = method.compute(
-            source.subject_levels, instances, source.knowledge, spec.weights
-        )
-    except ZeroDivisionError as exc:
-        # 市场状况指数填 0（或使某条比准价格算出 0）会让离散度公式除零——
-        # 这不是系统故障，是估价师填了个物理上不成立的指数，同样按 400 报告。
-        raise ValueError("市场状况指数或档次取值导致比准价格算出 0，无法计算离散度，请核对填写") from exc
-    logger.info(
-        "重算完成：类别=%s 比准价格=%s 评估结果=%s 离散度=%s",
-        category.value, result.比准价格, result.评估结果, result.离散度,
-    )
-    return result
+    return compute(source, instances, default_weights())
