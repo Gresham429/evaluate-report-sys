@@ -561,6 +561,10 @@ $('draftList').addEventListener('click', async (event) => {
     currentProject = body.数据.project;
     subjectLevels = body.数据.subject_levels || {};
     priceOrigin = body.数据.priceOrigin || 'empty';
+    // 续填的草稿可能是另一个项目——上一个项目重算过的快照绝不能带过来，
+    // 否则未重算就生成时，台账会把上一个项目的评估结果记成这份的（见
+    // task-7-report.md 续填漏重置一节）。与 newBtn / xlsx 两处保持一致。
+    lastCompute = null;
     await openForm(currentProject.category, { keepDraft: true });
   } else if (t.dataset.drop) {
     await fetch('/api/drafts/' + encodeURIComponent(t.dataset.drop), { method: 'DELETE' });
@@ -1202,14 +1206,11 @@ $('saveInstBtn').addEventListener('click', async () => {
 
 // ── 基础表页 ──────────────────────────────────────────────
 
-let current指纹 = '';
-
 async function loadBaseVersions() {
   const category = $('baseCategory').value;
   const r = await fetch('/api/base-tables?category=' + encodeURIComponent(category));
   if (!r.ok) return;
   const { versions, current } = await r.json();
-  current指纹 = current?.指纹 || '';
   $('baseVersions').innerHTML = versions.length ? `
     <thead><tr><th>版本（内容指纹）</th><th>导入时间</th><th>来源文件</th><th></th></tr></thead>
     <tbody>${versions.map((v) => `
@@ -1237,8 +1238,24 @@ $('baseXlsx').addEventListener('change', async (event) => {
   const r = await fetch('/api/base-tables', { method: 'POST', body: form });
   if (!r.ok) { $('baseStatus').textContent = '导入失败：' + (await r.json()).detail; return; }
   const body = await r.json();
-  $('baseCategory').value = body.base_table.类别;
-  const before = current指纹;
+  const importedCategory = body.base_table.类别;
+  $('baseCategory').value = importedCategory;
+  // 「是否首次导入」必须针对本次导入实际命中的类别——它由后端按文件内容判定，
+  // 可能与导入前下拉框停留的类别不同（如下拉框停在办公，直接导入商业基础表）。
+  // 不能像先前那样用一个跨类别共享的全局变量（当时下拉框选中类别的指纹）来判断，
+  // 那会把办公类的指纹当成商业类「之前的当前版」，也可能把商业类此前已有的当前版
+  // 误判为「没有」（本 session 恰好没加载过商业类）。
+  // 新版此刻已经落盘、追加在该类别台账末尾：直接按「导入命中的类别」重新拉一次
+  // 版本列表（导入时间新→旧），长度为 1 即该类别首次导入；大于 1 时，索引 1
+  // 就是导入前的当前版——纯前端可解，不必改后端。
+  let before = '';
+  if (body.是否新版) {
+    const catResp = await fetch('/api/base-tables?category=' + encodeURIComponent(importedCategory));
+    if (catResp.ok) {
+      const { versions } = await catResp.json();
+      before = versions.length > 1 ? versions[1].指纹 : '';
+    }
+  }
   // 先刷版本表，再写提示——loadBaseVersions 自己也写 baseStatus，
   // 顺序反了的话「未新增版本」这句会被它当场盖掉，估价师根本看不见。
   await loadBaseVersions();
@@ -1328,20 +1345,30 @@ $('ledgerList').addEventListener('click', async (event) => {
 $('ledgerDetail').addEventListener('click', async (event) => {
   const el = event.target;
   if (!(el instanceof HTMLElement) || el.id !== 'replayBtn') return;
+  // 照 computeBtn 的既有写法：try/catch/finally，请求期间禁用按钮，完毕恢复。
+  // 断网或响应非 JSON 时若没有 catch，状态会永远卡在「重算中……」，还会有
+  // 未捕获的 promise rejection。
+  el.disabled = true;
   $('replayStatus').textContent = '重算中……';
-  const r = await fetch('/api/ledger/' + encodeURIComponent(el.dataset.entry) + '/replay', { method: 'POST' });
-  const body = await r.json();
-  $('replayStatus').textContent = '';
-  if (!r.ok) {
-    $('replayResult').innerHTML = `<div class="err">${esc(body.detail)}</div>`;
-    return;
+  try {
+    const r = await fetch('/api/ledger/' + encodeURIComponent(el.dataset.entry) + '/replay', { method: 'POST' });
+    const body = await r.json();
+    if (!r.ok) {
+      $('replayResult').innerHTML = `<div class="err">${esc(body.detail)}</div>`;
+      return;
+    }
+    $('replayResult').innerHTML = body.一致
+      ? `<div class="result">✓ 复现成功：拿这条台账的快照重算，得到 <strong>${body.重算得的.评估结果}</strong>，
+          与当时记的完全一致。<br>
+          <span class="hint" style="margin:0">全程没碰实例库与基础表库——这条记录自己就够。</span></div>`
+      : `<div class="err">✗ 复现不出来：台账记的是 ${body.台账记的.评估结果}，
+          重算得 ${body.重算得的.评估结果}。这说明算法或数据有变，须查。</div>`;
+  } catch (err) {
+    $('replayResult').innerHTML = `<div class="err">请求失败：${esc(String(err))}</div>`;
+  } finally {
+    el.disabled = false;
+    $('replayStatus').textContent = '';
   }
-  $('replayResult').innerHTML = body.一致
-    ? `<div class="result">✓ 复现成功：拿这条台账的快照重算，得到 <strong>${body.重算得的.评估结果}</strong>，
-        与当时记的完全一致。<br>
-        <span class="hint" style="margin:0">全程没碰实例库与基础表库——这条记录自己就够。</span></div>`
-    : `<div class="err">✗ 复现不出来：台账记的是 ${body.台账记的.评估结果}，
-        重算得 ${body.重算得的.评估结果}。这说明算法或数据有变，须查。</div>`;
 });
 
 // ── 启动 ──────────────────────────────────────────────────
