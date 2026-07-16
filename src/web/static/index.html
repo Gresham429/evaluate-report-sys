@@ -250,6 +250,7 @@
     <button data-tab="report" class="on">出报告</button>
     <button data-tab="library">实例库</button>
     <button data-tab="base">基础表</button>
+    <button data-tab="ledger">台账</button>
   </nav>
 
   <!-- ═══════════════ 出报告 ═══════════════ -->
@@ -396,7 +397,23 @@
         <label class="filebtn">导入基础表<input type="file" id="baseXlsx" accept=".xlsx" hidden></label>
         <span class="status" id="baseStatus"></span>
       </div>
+      <div class="warn" id="baseWarn" hidden></div>
       <table id="baseVersions"></table>
+    </section>
+  </main>
+
+  <!-- ═══════════════ 台账 ═══════════════ -->
+  <main class="page" id="page-ledger" hidden>
+    <section class="panel">
+      <h2>报告生成台账 <span class="sub">每次生成留一条，只增不改</span></h2>
+      <div class="note">
+        每条记录都是<strong>完整快照</strong>——当时用的基础表知识、三条实例、市场状况指数、
+        算出的数字，全在里面。<br>
+        点「照此重算」可当场拿快照重算一遍，验证能不能复现出同一个数。<br>
+        <strong>台账只增不改</strong>：同一报告生成五次就是五条，中间改过什么全留着。
+      </div>
+      <table id="ledgerList"></table>
+      <div id="ledgerDetail"></div>
     </section>
   </main>
 </div>
@@ -417,6 +434,11 @@ let attachmentFiles = [];    // 附件不进草稿：File 对象存不进 JSON
 let priceUnit = '', areaUnit = '';
 let draftId = null;
 let priceOrigin = 'empty';   // 一览表单价从哪来：empty/excel/computed/manual
+
+// 重算成功后攒下来，随生成一起提交，落进台账。
+// null 即「这份报告没经引擎重算」——老路（导入 Excel 直接生成）正是如此，
+// 台账会如实记下这个事实。
+let lastCompute = null;
 
 /**
  * 19 项基本字段。标签**照抄估价师自己在 Excel 里写的**（A 列），不另起一套说法。
@@ -465,9 +487,10 @@ const EMPTY_SUBJECT = (index) => ({
 document.querySelectorAll('nav.tabs button').forEach((btn) => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('nav.tabs button').forEach((b) => b.classList.toggle('on', b === btn));
-    ['report', 'library', 'base'].forEach((p) => { $('page-' + p).hidden = p !== btn.dataset.tab; });
+    ['report', 'library', 'base', 'ledger'].forEach((p) => { $('page-' + p).hidden = p !== btn.dataset.tab; });
     if (btn.dataset.tab === 'library') loadLibrary();
     if (btn.dataset.tab === 'base') loadBaseVersions();
+    if (btn.dataset.tab === 'ledger') loadLedger();
   });
 });
 
@@ -591,6 +614,7 @@ $('newBtn').addEventListener('click', async () => {
   currentProject.subjects = [EMPTY_SUBJECT(1)];
   subjectLevels = {};
   priceOrigin = 'empty';
+  lastCompute = null;
   try {
     await openForm(category);
     $('xlsx-status').textContent = '';
@@ -619,6 +643,7 @@ $('xlsx').addEventListener('change', async (event) => {
   currentProject = body.project;
   subjectLevels = body.subject_levels;
   priceOrigin = 'excel';
+  lastCompute = null;
   $('xlsx-status').textContent = file.name;
   $('xlsx-status').className = 'status done';
   try {
@@ -881,6 +906,17 @@ $('instList').addEventListener('input', updateInstHint);
 $('instList').addEventListener('change', updateInstHint);
 
 async function applyComputed(result) {
+  lastCompute = {
+    category: currentProject.category,
+    base_table: baseTable?.指纹 || null,
+    subject_levels: { ...subjectLevels },
+    selected: collectSelectedInstances(),
+    result: {
+      比准价格: result.比准价格,
+      评估结果: result.评估结果,
+      离散度: result.离散度,
+    },
+  };
   currentProject.unit_price = result.评估结果;
   currentProject.dispersion = result.离散度;
   currentProject.subjects.forEach((s) => { s.unit_price = result.评估结果; });
@@ -993,6 +1029,7 @@ $('generate').addEventListener('click', async () => {
   status.textContent = '生成中……';
   const form = new FormData();
   form.append('project', JSON.stringify(currentProject));
+  if (lastCompute) form.append('ledger', JSON.stringify(lastCompute));
   attachmentFiles.forEach((f) => form.append('files', f));
   try {
     const response = await fetch('/api/render', { method: 'POST', body: form });
@@ -1165,11 +1202,14 @@ $('saveInstBtn').addEventListener('click', async () => {
 
 // ── 基础表页 ──────────────────────────────────────────────
 
+let current指纹 = '';
+
 async function loadBaseVersions() {
   const category = $('baseCategory').value;
   const r = await fetch('/api/base-tables?category=' + encodeURIComponent(category));
   if (!r.ok) return;
   const { versions, current } = await r.json();
+  current指纹 = current?.指纹 || '';
   $('baseVersions').innerHTML = versions.length ? `
     <thead><tr><th>版本（内容指纹）</th><th>导入时间</th><th>来源文件</th><th></th></tr></thead>
     <tbody>${versions.map((v) => `
@@ -1198,13 +1238,110 @@ $('baseXlsx').addEventListener('change', async (event) => {
   if (!r.ok) { $('baseStatus').textContent = '导入失败：' + (await r.json()).detail; return; }
   const body = await r.json();
   $('baseCategory').value = body.base_table.类别;
+  const before = current指纹;
   // 先刷版本表，再写提示——loadBaseVersions 自己也写 baseStatus，
   // 顺序反了的话「未新增版本」这句会被它当场盖掉，估价师根本看不见。
   await loadBaseVersions();
-  $('baseStatus').textContent = body.是否新版
-    ? `已导入新版本 ${body.base_table.指纹}（${body.base_table.类别}类）`
-    : `内容与 ${body.base_table.指纹} 相同，未新增版本——基础表没改过`;
-  $('baseStatus').className = 'status done';
+  if (body.是否新版) {
+    $('baseStatus').textContent = `已导入新版本 ${body.base_table.指纹}（${body.base_table.类别}类）`;
+    $('baseStatus').className = 'status done';
+    // 只有「之前已有当前版」时，才谈得上「与之前版不同」——首次导入没有
+    // 前一版可比较，不该报警告（brief 原文只按「是否新版」就报警告，
+    // 会在该类别首次导入时也弹出「与（无）不同」，与设计 §3「若指纹与
+    // 当前版不同」的措辞矛盾，此处补上 before 判断，见 task-7-report.md）。
+    if (before) {
+      // 新版会静默成为「当前」，之后所有新报告都用它。估价师若只是想调某一份报告，
+      // 这不是正确的做法——但今天他没有别的做法可用，所以至少要让他知道自己动了什么。
+      $('baseWarn').innerHTML =
+        `⚠ 这与之前的当前版 <span class="ver">${esc(before)}</span> 不同。<br>` +
+        `<strong>此机器上之后所有新建的报告都将使用新版 ${esc(body.base_table.指纹)}。</strong><br>` +
+        `若你只是想调整某一份报告，这不是正确的做法——单份偏离尚未上线。<br>` +
+        `旧版仍在，不会被删除；已生成报告的台账仍指向它们当时那版。`;
+      $('baseWarn').hidden = false;
+    } else {
+      $('baseWarn').hidden = true;
+    }
+  } else {
+    $('baseStatus').textContent = `内容与 ${body.base_table.指纹} 相同，未新增版本——基础表没改过`;
+    $('baseStatus').className = 'status done';
+    $('baseWarn').hidden = true;
+  }
+});
+
+// ── 台账页 ────────────────────────────────────────────────
+
+async function loadLedger() {
+  const r = await fetch('/api/ledger');
+  if (!r.ok) return;
+  const { entries } = await r.json();
+  $('ledgerDetail').innerHTML = '';
+  if (!entries.length) {
+    $('ledgerList').innerHTML = '';
+    $('ledgerDetail').innerHTML = '<div class="note">还没有生成过报告。</div>';
+    return;
+  }
+  $('ledgerList').innerHTML = `
+    <thead><tr>
+      <th>生成时间</th><th>报告编号</th><th>经手人</th>
+      <th>基础表版本</th><th class="num">评估结果</th><th>来源</th><th></th>
+    </tr></thead>
+    <tbody>${entries.map((e) => `
+      <tr>
+        <td class="num">${esc(e.生成时间.slice(0, 16).replace('T', ' '))}</td>
+        <td>${esc(e.报告编号 || '（未填编号）')}</td>
+        <td>${esc(e.经手人)}</td>
+        <td class="ver">${esc(e.基础表版本 || '—')}</td>
+        <td class="num">${e.评估结果 ?? '—'}</td>
+        <td>${e.经引擎重算
+              ? '<span class="chip">引擎重算</span>'
+              : '<span class="chip" style="border-color:var(--amber);color:var(--amber)">取自 Excel</span>'}</td>
+        <td><button type="button" class="mini" data-entry="${esc(e.记录号)}">查看</button></td>
+      </tr>`).join('')}</tbody>`;
+}
+
+$('ledgerList').addEventListener('click', async (event) => {
+  const el = event.target;
+  if (!(el instanceof HTMLElement) || !el.dataset.entry) return;
+  const detail = await (await fetch('/api/ledger/' + encodeURIComponent(el.dataset.entry))).json();
+  const inst = (detail.实例 || []).map((i) =>
+    `<li><span class="name">${esc(i.位置)}　<span class="hint" style="margin:0">成交价 ${i.成交价} ·
+     市场状况指数 ${i.市场状况指数}${i.判断依据 ? ' · ' + esc(i.判断依据) : ''}</span></span></li>`).join('');
+  $('ledgerDetail').innerHTML = `
+    <h2 style="margin-top:1.4rem">${esc(detail.报告编号)}
+      <span class="sub">${esc(detail.生成时间.replace('T', ' '))} · ${esc(detail.经手人)} · 程序 ${esc(detail.程序版本)}</span>
+    </h2>
+    ${detail.经引擎重算 ? '' :
+      '<div class="warn">这份报告<strong>未经系统重算</strong>，数值取自 Excel。</div>'}
+    ${detail.基础表 ? `<div class="note">基础表 <span class="ver">${esc(detail.基础表.实际指纹)}</span>
+       · ${detail.基础表.实际知识.因素.length} 个因素
+       · 偏离 ${detail.基础表.偏离.length} 项</div>` : ''}
+    ${inst ? `<ul class="plain">${inst}</ul>` : ''}
+    ${detail.经引擎重算 ? `
+      <div class="actions">
+        <button id="replayBtn" type="button" class="primary" data-entry="${esc(detail.记录号)}">照此重算</button>
+        <span class="status" id="replayStatus"></span>
+      </div>
+      <div id="replayResult"></div>` : ''}`;
+  $('ledgerDetail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+
+$('ledgerDetail').addEventListener('click', async (event) => {
+  const el = event.target;
+  if (!(el instanceof HTMLElement) || el.id !== 'replayBtn') return;
+  $('replayStatus').textContent = '重算中……';
+  const r = await fetch('/api/ledger/' + encodeURIComponent(el.dataset.entry) + '/replay', { method: 'POST' });
+  const body = await r.json();
+  $('replayStatus').textContent = '';
+  if (!r.ok) {
+    $('replayResult').innerHTML = `<div class="err">${esc(body.detail)}</div>`;
+    return;
+  }
+  $('replayResult').innerHTML = body.一致
+    ? `<div class="result">✓ 复现成功：拿这条台账的快照重算，得到 <strong>${body.重算得的.评估结果}</strong>，
+        与当时记的完全一致。<br>
+        <span class="hint" style="margin:0">全程没碰实例库与基础表库——这条记录自己就够。</span></div>`
+    : `<div class="err">✗ 复现不出来：台账记的是 ${body.台账记的.评估结果}，
+        重算得 ${body.重算得的.评估结果}。这说明算法或数据有变，须查。</div>`;
 });
 
 // ── 启动 ──────────────────────────────────────────────────
