@@ -40,3 +40,4 @@ def _isolate_data_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("实例库路径", str(tmp_path / "_默认实例库.json"))
     monkeypatch.setenv("草稿目录", str(tmp_path / "_默认草稿"))
     monkeypatch.setenv("基础表目录", str(tmp_path / "_默认基础表"))
+    monkeypatch.setenv("台账目录", str(tmp_path / "_默认台账"))

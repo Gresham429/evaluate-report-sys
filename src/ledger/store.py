@@ -36,7 +36,11 @@ class LedgerStore:
 
         Returns:
             记录号。
+
+        Raises:
+            ValueError: 记录号形状不安全（含路径分隔符、空字节，或是 `.`/`..`）。
         """
+        self._校验记录号(entry.记录号)
         self.path.mkdir(parents=True, exist_ok=True)
         stamp = entry.生成时间.strftime("%Y%m%d-%H%M%S")
         # 文件名只用时间戳与记录号：报告编号含 [] 等字符，既要清洗又会被 glob
@@ -66,10 +70,44 @@ class LedgerStore:
     def get(self, 记录号: str) -> LedgerEntry | None:
         """按记录号取一条。
 
+        **刻意不拿记录号拼路径**：这里是「先读全部、再按内容里的记录号字段过滤」，
+        不像 `append()` 拼文件名那样直接把记录号嵌进路径。这不是没顾上性能，
+        是安全选择——记录号会从网页 URL 原样传进来，若为了省下这次线性扫描而
+        改成拼路径直读，`"../../etc/passwd"` 这类记录号就是路径穿越，会读到
+        台账目录之外的文件。条目量对台账这种低频只增数据可忽略，这笔 O(n)
+        换来「记录号无论长什么样都出不了这个目录」的保证，划算。
+        `tests/test_ledger_store.py::test_get_rejects_path_traversal_record_id`
+        钉死了这一点，回归会被它挡住。
+
         Returns:
-            对应记录；记录号不存在时为 None。
+            对应记录；记录号不存在（含形状可疑、明显是路径穿越的记录号）时
+            均为 None。
         """
         return next((e for e in self._读全部() if e.记录号 == 记录号), None)
+
+    @staticmethod
+    def _校验记录号(记录号: str) -> None:
+        """记录号落文件名前的形状校验，写法与理由对齐 `drafts/store.py::_文件()`。
+
+        今天 `记录号` 只由 `new_record_id()`（uuid4 十六进制前 12 位）产出，
+        只含 `0-9a-f`，天然是安全文件名——但那只是调用约定，不是类型系统能
+        保证的事：`LedgerEntry` 是普通 frozen dataclass，`tests/test_ledger_model.py`
+        里已有「绕开 `LedgerEntry.new()`、直接构造 `LedgerEntry(...)`」的先例，
+        证明这条路走得通。将来若有调用方这么造一条记录号不干净的记录再
+        `append()`，若不在这里挡，文件名就会被直接注入。
+
+        Raises:
+            ValueError: 记录号为空，或含路径分隔符、空字节，或是 `.`/`..`。
+        """
+        if (
+            not 记录号
+            or "/" in 记录号
+            or "\\" in 记录号
+            or "\0" in 记录号
+            or 记录号 in (".", "..")
+        ):
+            logger.warning("记录号形状不安全，拒绝落台账：%r", 记录号)
+            raise ValueError(f"记录号不合法：{记录号!r}")
 
     def _读全部(self) -> list[LedgerEntry]:
         """读出目录下的全部记录。坏掉的单份跳过，不连累其余。"""

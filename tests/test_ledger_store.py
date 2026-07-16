@@ -4,13 +4,17 @@
 remove()、save()、update()，测试也盯着这一点。
 """
 
+import json
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
+
+import pytest
 
 from src.engine.inputs import from_excel
 from src.engine.methods.base import Instance, Result
 from src.knowledge_base.fingerprint import fingerprint
-from src.ledger.model import BaseTableUse, InstanceUse, LedgerEntry, MethodUse
+from src.ledger.model import BaseTableUse, InstanceUse, LedgerEntry, MethodUse, to_dict
 from src.ledger.store import LedgerStore
 from src.model import Category
 from tests.conftest import CASES
@@ -113,3 +117,40 @@ def test_file_is_human_readable(tmp_path: Path) -> None:
     text = next(tmp_path.glob("*.json")).read_text(encoding="utf-8")
     assert "正恒评报字" in text, "中文被转义了"
     assert "\n  " in text, "没有缩进"
+
+
+def test_append_rejects_unsafe_record_id(tmp_path: Path) -> None:
+    """记录号形状不安全就必须拒绝，不能被直接拼进文件名。
+
+    今天 `记录号` 只由 `new_record_id()` 产出，天然安全——但那只是调用约定，
+    不是保证：`LedgerEntry` 是普通 frozen dataclass，直接构造就能绕开
+    `new()`（`test_ledger_model.py` 里已有这么干的先例）。这里就用同样的
+    绕法，造一条记录号不干净的记录，钉死 `append()` 会拒绝它。
+    """
+    store = LedgerStore(tmp_path)
+    for 坏记录号 in ("../evil", "a/b", "a\\b", "..", ".", "", "带\0空字节"):
+        坏条目 = replace(_entry(), 记录号=坏记录号)
+        with pytest.raises(ValueError):
+            store.append(坏条目)
+    # 校验必须在落盘动作之前拦住，不能先写了坏文件再报错。
+    assert list(tmp_path.glob("*")) == [], "校验没拦住，留下了垃圾文件"
+
+
+def test_get_rejects_path_traversal_record_id(tmp_path: Path) -> None:
+    """`get()` 刻意不拿记录号拼路径；记录号从网页 URL 原样传入，不能被拼成
+    穿越到台账目录之外——这条测试钉死这一点，见 `store.get()` docstring。
+
+    台账目录之外放一份内容合法、能被 `from_dict` 解析的「诱饵」文件：如果
+    `get()` 哪天被改成直接拼路径读文件，这份诱饵就会被读到、返回给调用方，
+    而不是抛异常——那样的话下面 `is None` 的断言才会给出清楚的失败信息，
+    而不是被无关的 `FileNotFoundError` 掩盖。
+    """
+    store_dir = tmp_path / "台账"
+    store = LedgerStore(store_dir)
+    store.append(_entry())
+
+    诱饵 = json.dumps(to_dict(_entry(报告编号="诱饵")), ensure_ascii=False)
+    (tmp_path / "外部诱饵.json").write_text(诱饵, encoding="utf-8")
+
+    assert store.get("../外部诱饵") is None
+    assert store.get("../../../../../../etc/passwd") is None
