@@ -170,6 +170,17 @@
   .factor label { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; }
   .factor label .coef { font-family: var(--num); font-size: .68rem; color: var(--rule-2); }
   .factor.unset select { border-left: 2px solid var(--seal); }
+  .factor textarea { margin-bottom: .35rem; }
+
+  /* 资产状况按分组分节：区位/实物/权益，每节标题在前、该组因素网格在后。 */
+  .condGroupTitle {
+    margin: 1.4rem 0 0; padding-bottom: .3rem;
+    font-family: var(--serif); font-size: .88rem; font-weight: 600;
+    color: var(--ink-2); letter-spacing: .06em;
+    border-bottom: 1px solid var(--rule-2);
+  }
+  .condGroupTitle:first-of-type { margin-top: 0; }
+  .condGroupTitle .sub { font-weight: 400; font-size: .72rem; color: var(--ink-3); letter-spacing: 0; margin-left: .4rem; }
 
   /* ── 账簿式表格 ─────────────────────────────────── */
   table { border-collapse: collapse; width: 100%; margin-top: .9rem; }
@@ -319,8 +330,11 @@
       <div class="step-no">肆</div>
       <div class="step-body">
         <h2>估价对象因素档次 <span class="sub" id="levelsHint"></span></h2>
-        <div class="note">档次选项全部来自基础表——估价师维护基础表即维护选项，系统不编造档次。</div>
-        <div class="factors" id="factors"></div>
+        <div class="note">
+          档次选项全部来自基础表——估价师维护基础表即维护选项，系统不编造档次。<br>
+          每项因素先写资产状况描述（据实手写，是选档次的依据），再选档次；描述随报告一并生成。
+        </div>
+        <div id="factors"></div>
       </div>
     </section>
 
@@ -497,6 +511,7 @@ const EMPTY_PROJECT = () => ({
   certificate_status: '', owner: '', address: '', usage: '', scale: '', scope: '',
   current_status: '', work_period: '', issue_date: '', surveyor: '',
   unit_price: 0, dispersion: 0, subjects: [],
+  asset_conditions: {}, // {因素名: 描述}，随 currentProject 整体提交/存草稿，见 §肆
 });
 
 const EMPTY_SUBJECT = (index) => ({
@@ -626,6 +641,9 @@ async function loadFactors(category) {
 
 async function openForm(category, { keepDraft = false } = {}) {
   await loadFactors(category);
+  // 草稿存在 Task 9 之前不带 asset_conditions——续填这种旧草稿时补一个空对象，
+  // 不然 renderFactors() 读 currentProject.asset_conditions[名称] 会当场报错。
+  if (!currentProject.asset_conditions) currentProject.asset_conditions = {};
   priceUnit = category === '农用' ? '元/亩·年' : '元/㎡·天';
   areaUnit = category === '农用' ? '亩' : '㎡';
   if (!keepDraft) draftId = null;
@@ -686,6 +704,9 @@ $('xlsx').addEventListener('change', async (event) => {
   }
   const body = await response.json();
   currentProject = body.project;
+  // asset_conditions 与 project 同级返回（不进 Project 数据类，见 app.py 注释），
+  // 表单这层把它并进 currentProject，随整体提交/存草稿——预填每因素描述框。
+  currentProject.asset_conditions = body.asset_conditions || {};
   subjectLevels = body.subject_levels;
   priceOrigin = 'excel';
   lastCompute = null;
@@ -862,17 +883,66 @@ async function revalidate() {
 
 // ── 肆 因素档次 ───────────────────────────────────────────
 
+/**
+ * 资产状况分组顺序：区位→实物→权益（与后端 `GROUP_PREFIXES` 一致，不在这里
+ * 另编一份规则——分组本身来自基础表，见 /api/factors 的 `分组` 字段）。
+ */
+const COND_GROUP_ORDER = ['区位状况', '实物状况', '权益状况'];
+
+/** 档次下拉——三组因素与「未分组」因素共用同一段 select 渲染，逻辑不重复。 */
+function factorSelect(f, picked) {
+  return `<select data-level="${esc(f.名称)}" class="${picked ? '' : 'unset'}">
+    <option value="">请选择…</option>
+    ${f.档次.map((lv) => `<option${lv.描述 === picked ? ' selected' : ''} value="${esc(lv.描述)}">${esc(lv.描述)}</option>`).join('')}
+  </select>`;
+}
+
+/** 有分组的因素：描述 textarea 在前，档次 select 在后。 */
+function factorRow(f, i) {
+  const picked = subjectLevels[f.名称] || '';
+  const desc = currentProject.asset_conditions[f.名称] || '';
+  return `<div class="factor${picked ? '' : ' unset'}" data-factor="${i}">
+    <label><span>${esc(f.名称)}</span><span class="coef">每差1档 ${f.系数}</span></label>
+    <textarea data-desc="${esc(f.名称)}" placeholder="据实手写，作为选档次的依据">${esc(desc)}</textarea>
+    ${factorSelect(f, picked)}
+  </div>`;
+}
+
+/**
+ * 未分组因素：只有 select，没有描述 textarea。
+ *
+ * 因素在基础表里没能对上实勘表的分组前缀时，后端 `_asset_condition_groups_from_form`
+ * 不把它归进任何组（避免臆造归属），提交的描述会被静默丢弃——若这里仍给它一个
+ * textarea，等于给估价师一个填了也不进报告的假入口。故未分组因素退回 Task 9
+ * 之前的样子：只选档次，不采集描述。
+ */
+function factorRowPlain(f, i) {
+  const picked = subjectLevels[f.名称] || '';
+  return `<div class="factor${picked ? '' : ' unset'}" data-factor="${i}">
+    <label><span>${esc(f.名称)}</span><span class="coef">每差1档 ${f.系数}</span></label>
+    ${factorSelect(f, picked)}
+  </div>`;
+}
+
 function renderFactors() {
-  $('factors').innerHTML = factors.map((f, i) => {
-    const picked = subjectLevels[f.名称] || '';
-    return `<div class="factor${picked ? '' : ' unset'}" data-factor="${i}">
-      <label><span>${esc(f.名称)}</span><span class="coef">每差1档 ${f.系数}</span></label>
-      <select data-level="${esc(f.名称)}" class="${picked ? '' : 'unset'}">
-        <option value="">请选择…</option>
-        ${f.档次.map((lv) => `<option${lv.描述 === picked ? ' selected' : ''} value="${esc(lv.描述)}">${esc(lv.描述)}</option>`).join('')}
-      </select>
-    </div>`;
-  }).join('');
+  const grouped = new Map(COND_GROUP_ORDER.map((g) => [g, []]));
+  const ungrouped = [];
+  factors.forEach((f, i) => {
+    (grouped.has(f.分组) ? grouped.get(f.分组) : ungrouped).push({ f, i });
+  });
+  let html = '';
+  COND_GROUP_ORDER.forEach((g) => {
+    const items = grouped.get(g);
+    if (!items.length) return;
+    html += `<h3 class="condGroupTitle">${esc(g)}</h3>
+      <div class="factors">${items.map(({ f, i }) => factorRow(f, i)).join('')}</div>`;
+  });
+  if (ungrouped.length) {
+    html += `<h3 class="condGroupTitle">未分组
+        <span class="sub">未在实勘表分组中命中，只选档次，不采集资产状况描述</span></h3>
+      <div class="factors">${ungrouped.map(({ f, i }) => factorRowPlain(f, i)).join('')}</div>`;
+  }
+  $('factors').innerHTML = html;
 }
 
 $('factors').addEventListener('change', (event) => {
@@ -882,6 +952,13 @@ $('factors').addEventListener('change', (event) => {
   else delete subjectLevels[el.dataset.level];
   el.classList.toggle('unset', !el.value);
   el.closest('.factor')?.classList.toggle('unset', !el.value);
+  scheduleDraftSave();
+});
+
+$('factors').addEventListener('input', (event) => {
+  const el = event.target;
+  if (!el.dataset || !el.dataset.desc) return;
+  currentProject.asset_conditions[el.dataset.desc] = el.value;
   scheduleDraftSave();
 });
 
