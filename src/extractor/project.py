@@ -4,12 +4,34 @@ import logging
 from pathlib import Path
 
 from src.extractor.comparison import extract_comparison, extract_subjects
+from src.extractor.condition import GROUP_PREFIXES, read_survey_conditions
 from src.extractor.survey import extract_survey
-from src.model import Category, Project
+from src.model import Category, ConditionFactor, ConditionGroup, Project
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["load_project"]
+
+
+def _asset_condition_groups(path: Path) -> tuple[ConditionGroup, ...]:
+    """从实勘表读取资产状况并按组聚合。
+
+    按 GROUP_PREFIXES 顺序（区位→实物→权益）分组，
+    组内按出现序保持，丢弃空组。
+
+    Args:
+        path: xlsx 路径。
+
+    Returns:
+        按组聚合的 ConditionGroup 元组。
+    """
+    conds = read_survey_conditions(path)
+    ordered: dict[str, list[ConditionFactor]] = {g: [] for g in GROUP_PREFIXES}
+    for c in conds:
+        ordered.setdefault(c.group, []).append(ConditionFactor(c.factor, c.description))
+    return tuple(
+        ConditionGroup(name=g, factors=tuple(fs)) for g, fs in ordered.items() if fs
+    )
 
 
 def load_project(path: Path) -> Project:
@@ -54,4 +76,5 @@ def load_project(path: Path) -> Project:
         unit_price=comparison["unit_price"],
         dispersion=comparison["dispersion"],
         subjects=subjects,
+        asset_condition_groups=_asset_condition_groups(path),
     )
