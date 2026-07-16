@@ -237,6 +237,19 @@
   .instForm input { width: 5.5rem; font-family: var(--num); text-align: right; }
   .instForm input.wide { width: 15rem; font-family: var(--sans); text-align: left; }
 
+  /* ── 实例数据（展开查看，只读，不影响选择） ────────── */
+  .instDetail { margin: .4rem 0 0 1.6rem; }
+  .instDetail summary { cursor: pointer; font-size: .74rem; color: var(--ink-3); letter-spacing: .04em; user-select: none; }
+  .instDetail summary:hover { color: var(--seal); }
+  .instDetail dl {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: .35rem 1rem; margin: .5rem 0 0; padding: .5rem .6rem;
+    background: var(--card); border: 1px solid var(--rule); border-radius: 2px;
+  }
+  .instDetail dl > div.wide { grid-column: 1 / -1; }
+  .instDetail dt { font-size: .68rem; color: var(--ink-3); letter-spacing: .05em; margin: 0; }
+  .instDetail dd { font-size: .8rem; color: var(--ink-2); margin: .05rem 0 0; }
+
   /* ── 结果 ───────────────────────────────────────── */
   .figures { display: flex; gap: 2.2rem; flex-wrap: wrap; align-items: flex-end; }
   .figure .k { font-size: .7rem; letter-spacing: .1em; color: var(--ink-3); }
@@ -1015,6 +1028,17 @@ async function loadInstances(category) {
           </div>
         </span>
       </label>
+      <details class="instDetail">
+        <summary>实例数据</summary>
+        <dl>
+          <div><dt>编号</dt><dd>${esc(i.编号)}</dd></div>
+          <div><dt>面积</dt><dd>${Number(i.面积).toLocaleString()} ${esc(areaUnit)}</dd></div>
+          <div><dt>出租用途</dt><dd>${esc(i.出租用途) || '—'}</dd></div>
+          <div><dt>交易情况</dt><dd>${esc(i.交易情况) || '—'}</dd></div>
+          <div><dt>起始日</dt><dd>${esc(i.起始日 || '未知')}${i.日期精度 !== '完整' ? `（${esc(i.日期精度)}）` : ''}</dd></div>
+          ${i.备注 ? `<div class="wide"><dt>备注</dt><dd>${esc(i.备注)}</dd></div>` : ''}
+        </dl>
+      </details>
       <div class="instForm">
         <label>市场状况指数 <input type="text" class="mktIdx" placeholder="必填"></label>
         <label>判断依据 <input type="text" class="mktNote wide" placeholder="选填"></label>
