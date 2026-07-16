@@ -754,7 +754,12 @@ def create_app() -> FastAPI:
                 _build_ledger_entry(parsed, raw_ledger)
             )
             logger.info("台账已记 %s", 记录号)
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError, OSError):
+        except Exception:  # noqa: BLE001
+            # 兜住一切——这里的语义就是「无论台账出什么事，报告都得照常出」。
+            # 原本手工枚举五种异常，但那是靠自觉维持的白名单：将来任一被调模块
+            # 新增一种异常（哪怕笔误引发的 AttributeError），就会冲出 /api/render，
+            # 恰恰破坏这段代码的初衷。KeyboardInterrupt/SystemExit 不是 Exception
+            # 的子类，仍会正常穿透，不会被误吞。
             logger.exception("台账记录失败，报告照常生成：%s", parsed.report_no)
 
         logger.info("生成报告：%s", output.name)
