@@ -442,6 +442,7 @@ let baseTable = null;        // 当前基础表版本信息
 let attachmentFiles = [];    // 附件不进草稿：File 对象存不进 JSON
 let priceUnit = '', areaUnit = '';
 let draftId = null;
+let draftsCollapsed = false; // 顶部草稿列表是否收起（存住，免得每次重渲染又展开）
 let priceOrigin = 'empty';   // 一览表单价从哪来：empty/excel/computed/manual
 
 // 重算成功后攒下来，随生成一起提交，落进台账。
@@ -552,8 +553,12 @@ async function loadDraftList() {
   if (!r.ok) return;
   const { drafts } = await r.json();
   if (!drafts.length) { $('draftList').innerHTML = ''; return; }
-  $('draftList').innerHTML = `
-    <p class="hint" style="margin-top:.9rem">未完成的草稿（边填边存，可续填）：</p>
+  // 头部是折叠开关。草稿越用越多，收起来免得把下面的表单挤走；折叠状态
+  // 存在 draftsCollapsed 里，这样每次重渲染（边填边存频繁触发）都保持住。
+  const header = `<p class="hint" style="margin-top:.9rem;cursor:pointer;user-select:none"
+       data-toggle-drafts>${draftsCollapsed ? '▸' : '▾'} 未完成的草稿（${drafts.length} 份，边填边存，可续填）</p>`;
+  if (draftsCollapsed) { $('draftList').innerHTML = header; return; }
+  $('draftList').innerHTML = header + `
     <ul class="plain">${drafts.map((d) => {
       // 正在编辑的这条：标「编辑中」，不给「续填」「×」——你已经在它里面了，
       // 续填自己没意义（还可能盖掉刚填的），删自己更不该。
@@ -574,7 +579,10 @@ async function loadDraftList() {
 $('draftList').addEventListener('click', async (event) => {
   const t = event.target;
   if (!(t instanceof HTMLElement)) return;
-  if (t.dataset.draft) {
+  if (t.closest('[data-toggle-drafts]')) {
+    draftsCollapsed = !draftsCollapsed;
+    loadDraftList();
+  } else if (t.dataset.draft) {
     const body = await (await fetch('/api/drafts/' + encodeURIComponent(t.dataset.draft))).json();
     draftId = body.id;
     currentProject = body.数据.project;
