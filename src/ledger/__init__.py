@@ -11,6 +11,7 @@ from src.ledger.model import (
     new_record_id,
     to_dict,
 )
+from src.ledger.replay import replay
 from src.ledger.store import DEFAULT_LEDGER_DIR, LedgerStore
 
 __all__ = [
@@ -24,5 +25,6 @@ __all__ = [
     "current_operator",
     "from_dict",
     "new_record_id",
+    "replay",
     "to_dict",
 ]
