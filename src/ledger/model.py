@@ -164,7 +164,32 @@ class LedgerEntry:
         Args:
             now: 生成时间；缺省取当前时刻。显式开口子是为了让测试固定时间。
             经手人: 缺省自动取 `登录名@机器名`。
+
+        Raises:
+            ValueError: `基础表`、`估价对象档次`、`实例`、`方法`、`权重`、`结果`
+                六者没有同生共灭。这六个字段只因「经引擎重算」这一件事同时
+                出现——出现就必须一起出现，不出现就必须一起不出现，否则会
+                造出「有结果却没有基础表」这种记录：`经引擎重算` 单靠
+                `结果 is not None` 判断，那样的记录会自称「经引擎重算」，
+                却缺着重算所需的东西，它在说谎。这条校验只在写入路径
+                （本方法）上把关；`from_dict()` 读取台账文件时刻意不查，
+                理由见该函数 docstring。
         """
+        字段 = {
+            "基础表": 基础表,
+            "估价对象档次": 估价对象档次,
+            "实例": 实例,
+            "方法": 方法,
+            "权重": 权重,
+            "结果": 结果,
+        }
+        已给 = {名 for 名, 值 in 字段.items() if 值 is not None}
+        if 已给 and 已给 != set(字段):
+            缺失 = sorted(set(字段) - 已给)
+            raise ValueError(
+                "基础表/估价对象档次/实例/方法/权重/结果六者必须同生同灭"
+                f"（要么全有、要么全无）：已给 {sorted(已给)}，缺 {缺失}"
+            )
         return LedgerEntry(
             记录号=new_record_id(),
             报告编号=报告编号,
@@ -252,22 +277,34 @@ def to_dict(entry: LedgerEntry) -> dict[str, object]:
         "程序版本": entry.程序版本,
         "类别": entry.类别.value,
         "经引擎重算": entry.经引擎重算,
-        "基础表": _base_table_to_dict(entry.基础表) if entry.基础表 else None,
-        "估价对象档次": dict(entry.估价对象档次) if entry.估价对象档次 else None,
-        "实例": [_instance_to_dict(i) for i in entry.实例] if entry.实例 else None,
-        "方法": {"名称": entry.方法.名称, "版本": entry.方法.版本} if entry.方法 else None,
-        "权重": list(entry.权重) if entry.权重 else None,
+        # 一律用 is not None，不用真值判断：空 {} / 空 () 是「知道且为空」，
+        # None 是「压根没有」，两者语义不同。真值判断会把空容器也存成 None，
+        # 「空」与「没有」混成一个东西，台账就说不清历史上到底有没有这个字段。
+        "基础表": _base_table_to_dict(entry.基础表) if entry.基础表 is not None else None,
+        "估价对象档次": dict(entry.估价对象档次) if entry.估价对象档次 is not None else None,
+        "实例": [_instance_to_dict(i) for i in entry.实例] if entry.实例 is not None else None,
+        "方法": {"名称": entry.方法.名称, "版本": entry.方法.版本} if entry.方法 is not None else None,
+        "权重": list(entry.权重) if entry.权重 is not None else None,
         "结果": {
             "比准价格": list(entry.结果.比准价格),
             "评估结果": entry.结果.评估结果,
             "离散度": entry.结果.离散度,
-        } if entry.结果 else None,
+        } if entry.结果 is not None else None,
         "一览表": [dict(s) for s in entry.一览表],
     }
 
 
 def from_dict(data: dict[str, object]) -> LedgerEntry:
     """由 to_dict 的输出还原。
+
+    刻意不校验「基础表/估价对象档次/实例/方法/权重/结果」六者同生同灭
+    （那条校验在 `LedgerEntry.new()` 里，见其 docstring）。原因：台账文件
+    明说可以人类手改（`src/ledger/store.py` 的 `_读全部` 就是「坏文件跳过、
+    不连累其余」的容错立场）。读取端若加严格的跨字段校验，等于哪天有人
+    手改坏一条记录的某一个字段，整条记录直接读不出来、连内容都看不见，
+    反而不如原样读回来，让人自己看出它坏在哪。`new()` 是写入路径，绝不能
+    写出一条自相矛盾的记录；`from_dict()` 是读取路径，宁可读出一条「有点
+    可疑」的记录，也不要让人连读都读不到。
 
     Raises:
         KeyError: 必需字段缺失。
@@ -279,6 +316,8 @@ def from_dict(data: dict[str, object]) -> LedgerEntry:
     档次 = data.get("估价对象档次")
     权重 = data.get("权重")
     基础表 = data.get("基础表")
+    # 判断一律用 is not None，与 to_dict 对称：空 {} / 空 [] 也是「存在但为空」，
+    # 不是「没有这个字段」。一边认空一边不认，存与读就不是一回事，往返即废。
     return LedgerEntry(
         记录号=str(data["记录号"]),
         报告编号=str(data["报告编号"]),
@@ -286,17 +325,17 @@ def from_dict(data: dict[str, object]) -> LedgerEntry:
         经手人=str(data["经手人"]),
         程序版本=str(data["程序版本"]),
         类别=Category(str(data["类别"])),
-        基础表=_base_table_from_dict(dict(基础表)) if 基础表 else None,  # type: ignore[call-overload]
-        估价对象档次={str(k): str(v) for k, v in dict(档次).items()} if 档次 else None,  # type: ignore[call-overload]
-        实例=tuple(_instance_from_dict(i) for i in 实例) if 实例 else None,  # type: ignore[attr-defined]
+        基础表=_base_table_from_dict(dict(基础表)) if 基础表 is not None else None,  # type: ignore[call-overload]
+        估价对象档次={str(k): str(v) for k, v in dict(档次).items()} if 档次 is not None else None,  # type: ignore[call-overload]
+        实例=tuple(_instance_from_dict(i) for i in 实例) if 实例 is not None else None,  # type: ignore[attr-defined]
         方法=MethodUse(
             名称=str(dict(方法)["名称"]), 版本=str(dict(方法)["版本"])  # type: ignore[call-overload]
-        ) if 方法 else None,
-        权重=tuple(float(w) for w in 权重) if 权重 else None,  # type: ignore[attr-defined]
+        ) if 方法 is not None else None,
+        权重=tuple(float(w) for w in 权重) if 权重 is not None else None,  # type: ignore[attr-defined]
         结果=Result(
             比准价格=tuple(float(p) for p in dict(结果)["比准价格"]),  # type: ignore[call-overload]
             评估结果=float(dict(结果)["评估结果"]),  # type: ignore[arg-type,call-overload]
             离散度=float(dict(结果)["离散度"]),  # type: ignore[arg-type,call-overload]
-        ) if 结果 else None,
+        ) if 结果 is not None else None,
         一览表=tuple(dict(s) for s in data.get("一览表", [])),  # type: ignore[attr-defined]
     )

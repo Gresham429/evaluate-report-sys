@@ -6,6 +6,8 @@
 
 from datetime import datetime
 
+import pytest
+
 from src.engine.inputs import from_excel
 from src.engine.knowledge import Knowledge
 from src.engine.methods.base import Instance, Result
@@ -153,3 +155,78 @@ def test_operator_is_login_at_host() -> None:
 def test_time_is_injectable() -> None:
     """测试要能固定时间，模块内不许直接调 datetime.now() 而无法注入。"""
     assert _entry().生成时间 == WHEN
+
+
+def test_empty_containers_are_not_flattened_to_none() -> None:
+    """空容器（`{}` / `()`）与「压根没有」（`None`）不是一回事，不能被序列化成同一个值。
+
+    这里故意绕开 `LedgerEntry.new()`、直接构造 `LedgerEntry(...)`：
+    「估价对象档次={}、实例=()、权重=()，但结果非 None」本身就是六字段
+    不同生共灭的自相矛盾记录，会被问题二新加的 `new()` 校验拒掉——但那条校验
+    只把关写入路径，不代表这种（字段类型上）合法的空容器组合在数据层面
+    不该被正确序列化。直接构造对象绕过 `new()`，只测 `to_dict`/`from_dict`
+    这一层「空不是没有」的语义本身。
+    """
+    knowledge = _knowledge()
+    digest = fingerprint(knowledge)
+    entry = LedgerEntry(
+        记录号="deadbeefcafe",
+        报告编号="正恒评报字[2026]第F071号",
+        生成时间=WHEN,
+        经手人="张三@ZH-PC-03",
+        程序版本="0.0.0-test",
+        类别=Category.OFFICE,
+        基础表=BaseTableUse(基线版本=digest, 偏离=(), 实际知识=knowledge, 实际指纹=digest),
+        估价对象档次={},
+        实例=(),
+        方法=MethodUse(名称="市场比准法-2026", 版本="2026-07"),
+        权重=(),
+        结果=Result(比准价格=(2.92, 2.77, 2.80), 评估结果=2.83, 离散度=0.05),
+        一览表=(),
+    )
+    data = to_dict(entry)
+    assert data["估价对象档次"] == {}
+    assert data["估价对象档次"] is not None
+    assert data["实例"] == []
+    assert data["实例"] is not None
+    assert data["权重"] == []
+    assert data["权重"] is not None
+    assert from_dict(data) == entry
+
+
+def test_new_rejects_result_without_base_table() -> None:
+    """有结果、无基础表：`经引擎重算` 会自称 True 却缺着重算所需的东西，必须拒绝。"""
+    with pytest.raises(ValueError, match="同生同灭"):
+        LedgerEntry.new(
+            报告编号="正恒评报字[2026]第F071号",
+            类别=Category.OFFICE,
+            基础表=None,
+            估价对象档次=None,
+            实例=None,
+            方法=None,
+            权重=None,
+            结果=Result(比准价格=(2.92, 2.77, 2.80), 评估结果=2.83, 离散度=0.05),
+            一览表=(),
+            now=WHEN,
+            经手人="张三@ZH-PC-03",
+        )
+
+
+def test_new_rejects_base_table_without_result() -> None:
+    """反过来，有基础表、无结果同样不一致：重算的输入在，输出却不在。"""
+    knowledge = _knowledge()
+    digest = fingerprint(knowledge)
+    with pytest.raises(ValueError, match="同生同灭"):
+        LedgerEntry.new(
+            报告编号="正恒评报字[2026]第F071号",
+            类别=Category.OFFICE,
+            基础表=BaseTableUse(基线版本=digest, 偏离=(), 实际知识=knowledge, 实际指纹=digest),
+            估价对象档次=None,
+            实例=None,
+            方法=None,
+            权重=None,
+            结果=None,
+            一览表=(),
+            now=WHEN,
+            经手人="张三@ZH-PC-03",
+        )
