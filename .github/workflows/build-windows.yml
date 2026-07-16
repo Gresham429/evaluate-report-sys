@@ -60,12 +60,23 @@ jobs:
       - name: 打包
         run: uv run python build_exe.py
 
-      - name: 冒烟测试——验它真能用，不只是编译过了
-        run: uv run python tools/smoke_exe.py "dist/_package/估价报告系统/估价报告系统.exe"
+      - name: 冒烟测试（暂存目录）——验它真能用，不只是编译过了
+        run: uv run python tools/smoke_exe.py "dist/_package/appraisal-report-system/appraisal-report-system.exe"
+
+      # **对着真发出去的 zip 再冒烟一遍。** 上面那步跑的是暂存目录（普通文件复制，
+      # 名字完好），可用户拿到的是 zip、要自己解压——两者不是一回事。合并前那个坑
+      # 正是这么溜过去的方向：中文模板名进 zip、被第三方解压软件按 GBK 解成乱码，
+      # render() 就找不到，一份报告也出不来。现在名字全 ASCII 不该再乱，但这条盲区
+      # 必须有测试兜住：真解压、真跑、真出一份报告，才算验到了交付形态。
+      - name: 冒烟测试（解压交付 zip）——验用户真正拿到的那个包
+        shell: pwsh
+        run: |
+          $dest = Join-Path $env:RUNNER_TEMP 'delivered'
+          Expand-Archive -Path 'dist/appraisal-report-system-windows.zip' -DestinationPath $dest -Force
+          uv run python tools/smoke_exe.py "$dest/appraisal-report-system/appraisal-report-system.exe"
 
       # 名字只能用 ASCII：GitHub 会把资产名/产物名里的非 ASCII 字符直接删掉，
       # 「估价报告系统-windows.zip」上传后变成「-windows.zip」（v1.0.0 实测）。
-      # 包内部的目录名不受影响，解压出来仍是「估价报告系统/」。
       - name: 上传交付包
         uses: actions/upload-artifact@v4
         with:
@@ -81,8 +92,9 @@ jobs:
         with:
           files: dist/appraisal-report-system-windows.zip
           body: |
-            下载 `appraisal-report-system-windows.zip`，解压后双击
-            `估价报告系统/估价报告系统.exe`，浏览器自动打开。
+            下载 `appraisal-report-system-windows.zip`，**完整解压到一个文件夹**，
+            再双击 `appraisal-report-system/appraisal-report-system.exe`，浏览器
+            自动打开。（别在压缩软件里直接双击 exe——那样模板没解压出来，出不了报告。）
 
             **首次使用须先导入基础表**：到「基础表」页，导入贵司的
             「实勘表、比较法.xlsx」，三类各一次。详见包内 `使用说明.md`。

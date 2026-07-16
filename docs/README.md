@@ -5,7 +5,7 @@
 > 细节在各专题文档里，本页只给指路。
 
 - 更新：2026-07-16
-- 分支：`main`（干净，367 项测试全绿）
+- 分支：`main`（干净，375 项测试全绿）
 - 远端：`git@github.com:Gresham429/evaluate-report-sys.git`（私有）
 
 ## 0. 一句话
@@ -84,7 +84,7 @@ src/
 ```bash
 uv sync
 uv run python -m src          # 起本地服务，自动开浏览器 http://127.0.0.1:8765
-uv run pytest                 # 367 项
+uv run pytest                 # 375 项
 uv run mypy src/              # 干净
 uv run ruff check .           # 干净
 ```
@@ -113,6 +113,17 @@ PyInstaller 不支持交叉编译，只有 windows runner 能出 .exe。见根 R
    先 `data_only=True` 压平再改，否则 28 系数全塌成 0、测试因无关原因变绿。
 6. **冻结路径**：exe 里 `Path(__file__)` 指向退出即删的临时目录。所有用户数据/外置文件走
    `src/paths.py`。`tests/test_paths.py` 假装冻结盯死这条线。
+7. **交付 zip 里别放中文文件名**：中文名会被第三方解压软件（WinRAR/360/好压/2345）按
+   GBK 解成乱码（`农用.docx`→`鍐滅敤.docx`），render() 便找不到模板、一份报告也出不来
+   （v1.0.1 实测）。凡随包发出、要被机器按名字找的标识一律 ASCII（同 Release 资产名、
+   HTTP 路径参数那两跤）。模板名与「类别值」解耦见 `render.TEMPLATE_FILENAMES`——类别值
+   本身仍是中文，遍布 JSON/台账快照，**不能动**。`tests/test_delivery_ascii.py` 守住这条。
+8. **冒烟别只测暂存目录**：`smoke_exe.py` 从前只跑 `dist/_package/`（文件复制，名字完好），
+   从没跑过用户真解压的 zip——中文名乱码正好在这个盲区里溜过。workflow 已加「解压交付
+   zip 再冒烟」一步，验的是用户真正拿到的形态。
+9. **隐藏终端后 stdout 变 None**：`--noconsole` 打包后 PyInstaller 把 `sys.stdout/stderr`
+   置 None，logging/uvicorn 的 StreamHandler 会炸、程序默默起不来。`__main__._setup_logging`
+   在 uvicorn 启动前把标准流接到 exe 旁的 `运行日志.log`，`tests/test_logging_setup.py` 盯着。
 
 ## 6. 打磨轮的实测 bug（都已修，记此备查）
 
@@ -122,6 +133,12 @@ PyInstaller 不支持交叉编译，只有 windows runner 能出 .exe。见根 R
 - Release 资产名中文被 GitHub 删空 → 改 ASCII
 - 新建表单后草稿列表不刷新、续填后「编辑中」标记不跟随（`openForm` 收口）
 - 草稿列表/表单各段可折叠、草稿列表加滚动
+- **（v1.0.2）Windows 交付三连**——都是「本地/CI 全绿、用户机上炸」的交付类：
+  - 双击 exe 弹出黑终端 → `build_exe.py` 加 `--noconsole`（仅 Windows）
+  - 终端里中文乱码 → 隐藏终端即消失；隐藏后 stdout=None，日志改落 exe 旁 `运行日志.log`
+  - 中文模板名被第三方解压软件解成乱码 → 找不到模板、出不了报告：模板名改 ASCII
+    （`farmland/office/commercial.docx`），交付名（exe/内层目录）一并 ASCII 化；
+    补「解压交付 zip 再冒烟」堵住冒烟盲区。见 §5 的坑 7/8/9。
 
 ## 7. 未决清单（下一步的候选，均未做）
 

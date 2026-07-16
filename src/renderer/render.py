@@ -13,17 +13,39 @@ from docx.shared import Mm
 from docxtpl import DocxTemplate, InlineImage
 
 from src.attachments.collector import AttachmentPage
-from src.model import Project
+from src.model import Category, Project
 from src.paths import templates_dir
 from src.prose.capital import to_capital
 from src.prose.composer import compose
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["build_context", "render", "DEFAULT_TEMPLATES_DIR", "ATTACHMENT_WIDTH_MM"]
+__all__ = [
+    "build_context",
+    "render",
+    "DEFAULT_TEMPLATES_DIR",
+    "TEMPLATE_FILENAMES",
+    "ATTACHMENT_WIDTH_MM",
+]
 
 DEFAULT_TEMPLATES_DIR = templates_dir()
 ATTACHMENT_WIDTH_MM = 160
+
+# 模板文件名一律 ASCII，且与类别标识**解耦**。
+#
+# 类别本身（Category 的值：农用/办公/商业）是数据模型身份，遍布 JSON payload、
+# 台账快照、基础表键，绝不能动。但若直接拿它当文件名（`农用.docx`），交付 zip
+# 一经第三方中文解压软件（WinRAR/360/好压/2345）按 GBK 解码，就变成乱码
+# `鍐滅敤.docx`——render() 按原中文名再也找不到，一份报告也出不来。
+#
+# 这与项目栽过的两跤同类：Release 资产名中文被 GitHub 删空、中文不能做 HTTP 路径
+# 参数。凡随包发出、要被机器按名字找的标识，一律 ASCII。故此处把「文件名」从
+# 「类别值」独立出来，单独取 ASCII 名。
+TEMPLATE_FILENAMES: dict[Category, str] = {
+    Category.AGRICULTURAL: "farmland.docx",
+    Category.OFFICE: "office.docx",
+    Category.COMMERCIAL: "commercial.docx",
+}
 
 
 def _validity_end_cn(issue_date: str) -> str:
@@ -187,7 +209,7 @@ def render(
         FileNotFoundError: 模板不存在。
     """
     directory = templates_dir or DEFAULT_TEMPLATES_DIR
-    template_path = directory / f"{project.category.value}.docx"
+    template_path = directory / TEMPLATE_FILENAMES[project.category]
     if not template_path.exists():
         raise FileNotFoundError(f"模板不存在：{template_path}")
 
