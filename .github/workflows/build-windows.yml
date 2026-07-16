@@ -23,6 +23,11 @@ on:
 permissions:
   contents: write         # 打 tag 时创建 Release 需要
 
+env:
+  # Windows 控制台默认不是 UTF-8，Python 会把中文退化成 ① 这类转义再输出。
+  # 成功时只是难看，失败时是真麻烦——冒烟测试的报错全是中文，读不懂等于没有报错。
+  PYTHONIOENCODING: utf-8
+
 jobs:
   build:
     runs-on: windows-latest
@@ -44,11 +49,14 @@ jobs:
       - name: 冒烟测试——验它真能用，不只是编译过了
         run: uv run python tools/smoke_exe.py "dist/_package/估价报告系统/估价报告系统.exe"
 
+      # 名字只能用 ASCII：GitHub 会把资产名/产物名里的非 ASCII 字符直接删掉，
+      # 「估价报告系统-windows.zip」上传后变成「-windows.zip」（v1.0.0 实测）。
+      # 包内部的目录名不受影响，解压出来仍是「估价报告系统/」。
       - name: 上传交付包
         uses: actions/upload-artifact@v4
         with:
-          name: 估价报告系统-windows
-          path: dist/估价报告系统-windows.zip
+          name: appraisal-report-system-windows
+          path: dist/appraisal-report-system-windows.zip
           if-no-files-found: error
           retention-days: 90
 
@@ -57,9 +65,10 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/估价报告系统-windows.zip
+          files: dist/appraisal-report-system-windows.zip
           body: |
-            解压后双击 `估价报告系统.exe`，浏览器自动打开。
+            下载 `appraisal-report-system-windows.zip`，解压后双击
+            `估价报告系统/估价报告系统.exe`，浏览器自动打开。
 
             **首次使用须先导入基础表**：到「基础表」页，导入贵司的
             「实勘表、比较法.xlsx」，三类各一次。详见包内 `使用说明.md`。

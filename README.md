@@ -41,7 +41,7 @@
 
 ```bash
 uv sync
-uv run pytest          # 313 项
+uv run pytest          # 320 项
 uv run mypy src/
 uv run ruff check .
 uv run python -m src   # 起本地服务，自动开浏览器
@@ -89,7 +89,7 @@ uv run python tools/smoke_exe.py "dist/_package/估价报告系统/估价报告�
 ### 交付包里放什么
 
 ```
-估价报告系统-windows.zip
+appraisal-report-system-windows.zip     ← 文件名只能用 ASCII，见 build_exe.py
 └── 估价报告系统/
     ├── 估价报告系统.exe
     ├── templates/        三份模板，可在 Word 里改
@@ -101,12 +101,13 @@ uv run python tools/smoke_exe.py "dist/_package/估价报告系统/估价报告�
 塞进交付包的话，下次解压升级会把人家攒的实例库连同草稿一起盖掉：升级不该是
 数据事故。
 
-## 交付形态
+### 估价师机器上的样子
+
+首次运行后 `data/` 自动出现：
 
 ```
 估价报告系统/
-├── 估价报告系统.exe      ← 双击，自动开浏览器
-├── templates/            ← 三份模板，可在 Word 里编辑
-├── copy.yaml             ← 法定套话，改一处三类同步
+├── 估价报告系统.exe
+├── templates/、copy.yaml
 └── data/                 ← 实例库、草稿、基础表各版本。纯 JSON，可直接看可备份
 ```

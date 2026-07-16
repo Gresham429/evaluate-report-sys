@@ -28,6 +28,12 @@ ROOT = Path(__file__).parent
 DIST = ROOT / "dist"
 APP_NAME = "估价报告系统"
 
+# zip 的文件名只能用 ASCII：GitHub Release 会把资产名里的非 ASCII 字符**直接删掉**，
+# 「估价报告系统-windows.zip」上传后变成「-windows.zip」（实测 v1.0.0）——估价师点
+# 下载会拿到一个叫「-windows.zip」的东西。
+# 包**内部**的目录名不受此限，仍是中文：解压出来就是「估价报告系统/」。
+ARCHIVE_STEM = "appraisal-report-system-windows"
+
 # 交付包里放什么。**刻意不放 data/**：那是估价师的实例库、草稿、基础表，
 # 由程序首次运行时自建。塞进交付包的话，下次解压升级会把人家攒的实例库连同
 # 草稿一起盖掉——升级不该是数据事故。
@@ -90,7 +96,7 @@ def main() -> int:
 
     staging = _stage()
     archive = Path(
-        shutil.make_archive(str(DIST / f"{APP_NAME}-windows"), "zip", staging.parent, APP_NAME)
+        shutil.make_archive(str(DIST / ARCHIVE_STEM), "zip", staging.parent, APP_NAME)
     )
     logger.info("已产出交付包 %s（%.1f MB）", archive, archive.stat().st_size / 1024 / 1024)
     logger.info("下一步验它真能用：uv run python tools/smoke_exe.py %s", staging / exe_name())
