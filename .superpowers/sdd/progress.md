@@ -284,3 +284,35 @@ Task 7: complete (9 项测试, 全量 210) —— 闭环：/api/import、/api/li
   当前全量: 210 passed, mypy clean（src）, ruff clean
 
 进度: 第二轮 7/7 完成，功能环已闭合（细节与自审见 r2-task-7-report.md）
+
+---
+
+## 第四轮：报告生成台账（分支 feat/ledger）
+
+计划：docs/superpowers/plans/2026-07-16-报告生成台账.md
+设计：docs/superpowers/specs/2026-07-16-报告生成台账与知识权威-design.md
+起点：main @ ad69562，基线 320 项测试全绿
+
+Pre-flight：
+- 原在 main 上开工 → 已建分支 feat/ledger
+- 计划自相矛盾：Task 3 的 __init__.py 代码块 import 了 Task 4 才建的 store，
+  注记却说只写空的。照代码块写会直接 ImportError → 已修（33bed03）
+
+- [x] Task 1 版本号单一来源            完成（af68234..3714ec0，评审 规格✅/质量通过）
+      实施者与评审各自独立逮到同一个计划 bug：Step 1 的测试
+      `assert "importlib.metadata" not in source` 是裸文本扫描，与 Step 3 要求
+      docstring 解释「为什么不用它」逐字冲突——测试在惩罚文档写得清楚。
+      评审多找到一层：这条隐形约束只记在被 gitignore 的报告里，将来 CI 莫名变红
+      没人知道为什么。用户定：改查 AST。已修代码 + 修计划配方（8dfab8a）。
+      控制者独立复验：两种 import 写法都判红，docstring 提名不误伤。
+- [ ] Task 2 拆开「取实例」与「算」
+- [ ] Task 3 台账数据模型
+- [ ] Task 4 台账存储
+- [ ] Task 5 照台账重算
+- [ ] Task 6 生成报告时落台账
+- [ ] Task 7 台账界面 + 导入警告
+- [ ] Task 8 文档
+
+### Minor findings（留给最终整体评审分诊）
+
+（暂无）
