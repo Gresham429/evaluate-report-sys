@@ -7,6 +7,7 @@
 且代码里根本没有版本号可读。
 """
 
+import ast
 import re
 import tomllib
 from pathlib import Path
@@ -32,7 +33,23 @@ def test_frozen_exe_can_read_it() -> None:
 
     冻结的 exe 里包没被安装，metadata 读不到——那样台账里的版本号会是空的，
     而它恰恰是出事时最要紧的一列。
+
+    用 AST 解析而不是文本扫描：文本扫描分不清「代码真的 import 了它」和
+    「docstring 在解释为什么不该 import 它」，会逼着文档把这个名字藏起来，
+    反而惩罚了写得清楚的注释。`import importlib.metadata` 和
+    `from importlib import metadata` 是两种等价写法，只堵一种等于没堵。
     """
     source = (_ROOT / "src" / "version.py").read_text(encoding="utf-8")
-    assert "importlib.metadata" not in source
-    assert "__version__" in source
+    tree = ast.parse(source, filename="src/version.py")
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported = {alias.name for alias in node.names}
+            assert "importlib.metadata" not in imported, (
+                "禁止 `import importlib.metadata`：冻结的 exe 读不到包元信息"
+            )
+        elif isinstance(node, ast.ImportFrom):
+            if node.module == "importlib":
+                imported = {alias.name for alias in node.names}
+                assert "metadata" not in imported, (
+                    "禁止 `from importlib import metadata`：冻结的 exe 读不到包元信息"
+                )
