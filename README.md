@@ -34,6 +34,7 @@
 
 | | |
 |---|---|
+| **总入口 / 现状** | [`docs/README.md`](docs/README.md) —— **换会话、接手改 bug 先看这里**：现状、代码地图、铁律、坑、未决清单 |
 | 使用说明 | [`docs/使用说明.md`](docs/使用说明.md) |
 | 决策记录 | [`docs/decisions/`](docs/decisions/) —— 为什么这么定，改动前先读 |
 | 设计与计划 | [`docs/superpowers/`](docs/superpowers/) |
