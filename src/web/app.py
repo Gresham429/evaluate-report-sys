@@ -29,8 +29,10 @@ from src.attachments.collector import AttachmentPage, collect
 from src.drafts.model import Draft
 from src.drafts.store import DEFAULT_DRAFT_DIR, DraftStore
 from src.engine.annual import annual_value
-from src.engine.compute import compute_from_selection
+from src.engine.compute import METHOD_NAME, compute_from_selection, default_weights
 from src.engine.inputs import ComparisonInput, from_excel
+from src.engine.methods import get_method
+from src.engine.methods.base import Instance, Result
 from src.extractor.project import load_project
 from src.knowledge_base.store import (
     DEFAULT_STORE_DIR as DEFAULT_BASE_TABLE_DIR,
@@ -39,6 +41,10 @@ from src.knowledge_base.store import (
     BaseTableStore,
     VersionInfo,
 )
+from src.ledger.model import BaseTableUse, InstanceUse, LedgerEntry, MethodUse
+from src.ledger.model import to_dict as ledger_to_dict
+from src.ledger.replay import replay
+from src.ledger.store import DEFAULT_LEDGER_DIR, LedgerStore
 from src.library.importer import import_from_excel
 from src.library.model import StoredInstance, make_id, parse_lease_start
 from src.library.store import DEFAULT_STORE_PATH, InstanceStore
@@ -70,6 +76,11 @@ def _draft_dir() -> Path:
 def _base_table_dir() -> Path:
     """基础表目录。测试通过环境变量覆盖。"""
     return Path(os.environ.get("基础表目录", str(DEFAULT_BASE_TABLE_DIR)))
+
+
+def _ledger_dir() -> Path:
+    """台账目录。测试通过环境变量覆盖。"""
+    return Path(os.environ.get("台账目录", str(DEFAULT_LEDGER_DIR)))
 
 
 def _version_payload(info: VersionInfo) -> dict[str, object]:
@@ -154,6 +165,80 @@ def _safe_filename(name: str) -> str:
     """把报告编号整理成合法文件名，为空时兜底。"""
     cleaned = "".join(c for c in name if c not in _UNSAFE_FILENAME_CHARS).strip()
     return cleaned or "估价报告"
+
+
+def _build_ledger_entry(project: Project, raw: dict[str, Any] | None) -> LedgerEntry:
+    """按一次生成攒出台账记录。
+
+    `raw` 为 None（或缺关键字段）即视为**未经系统重算**——导入 Excel 直接生成的
+    老路正是如此。此时基础表/档次/实例/方法/权重/结果全为 None，`经引擎重算` 为 False。
+    这不是缺失，恰恰是复核最想知道的事：这份报告的数字不是引擎算的。
+    """
+    一览表 = tuple(
+        {
+            "index": s.index, "owner": s.owner, "address": s.address, "usage": s.usage,
+            "area": s.area, "unit_price": s.unit_price, "annual_value": s.annual_value,
+        }
+        for s in project.subjects
+    )
+    if not raw or not raw.get("result"):
+        return LedgerEntry.new(
+            报告编号=project.report_no, 类别=project.category,
+            基础表=None, 估价对象档次=None, 实例=None, 方法=None, 权重=None, 结果=None,
+            一览表=一览表,
+        )
+
+    category = Category(str(raw.get("category", project.category.value)))
+    fingerprint_raw = raw.get("base_table")
+    base_store = BaseTableStore(_base_table_dir())
+    knowledge = base_store.load(category, str(fingerprint_raw) if fingerprint_raw else None)
+    current = base_store.current(category)
+    baseline = str(fingerprint_raw) if fingerprint_raw else (current.指纹 if current else "")
+
+    levels = {str(k): str(v) for k, v in dict(raw["subject_levels"]).items()}
+    inst_store = InstanceStore(_store_path())
+    inst_store.load()
+    uses: list[InstanceUse] = []
+    for item in raw["selected"]:
+        stored = inst_store.get(str(item["编号"]))
+        if stored is None:
+            raise ValueError(f"编号不在库中，无法记入台账：{item['编号']}")
+        uses.append(
+            InstanceUse(
+                实例=Instance(
+                    位置=stored.位置,
+                    成交价=stored.成交价,
+                    交易情况指数=stored.交易情况指数,
+                    市场状况指数=_to_float(item["市场状况指数"]),
+                    因素档次=dict(stored.因素档次),
+                ),
+                编号=stored.编号,
+                判断依据=str(item.get("备注", "")),
+            )
+        )
+
+    result_raw = dict(raw["result"])
+    return LedgerEntry.new(
+        报告编号=project.report_no,
+        类别=category,
+        基础表=BaseTableUse(
+            基线版本=baseline,
+            # 今天恒空——偏离功能未上线（用户决定：只留口子）。
+            偏离=(),
+            实际知识=knowledge,
+            实际指纹=baseline,
+        ),
+        估价对象档次=levels,
+        实例=tuple(uses),
+        方法=MethodUse(名称=METHOD_NAME, 版本=get_method(METHOD_NAME).version),
+        权重=default_weights(),
+        结果=Result(
+            比准价格=tuple(float(p) for p in result_raw["比准价格"]),
+            评估结果=float(result_raw["评估结果"]),
+            离散度=float(result_raw["离散度"]),
+        ),
+        一览表=一览表,
+    )
 
 
 def create_app() -> FastAPI:
@@ -567,9 +652,76 @@ def create_app() -> FastAPI:
             shutil.rmtree(workdir, ignore_errors=True)
         return {"base_table": _version_payload(imported.版本), "是否新版": imported.是否新版}
 
+    @app.get("/api/ledger")
+    def list_ledger() -> dict[str, object]:
+        """台账列表，生成时间新→旧。**不含整份基础表知识**——列表不必背着它走。"""
+        return {
+            "entries": [
+                {
+                    "记录号": e.记录号,
+                    "报告编号": e.报告编号,
+                    "生成时间": e.生成时间.isoformat(),
+                    "经手人": e.经手人,
+                    "程序版本": e.程序版本,
+                    "类别": e.类别.value,
+                    "经引擎重算": e.经引擎重算,
+                    "基础表版本": e.基础表.实际指纹 if e.基础表 else None,
+                    "评估结果": e.结果.评估结果 if e.结果 else None,
+                }
+                for e in LedgerStore(_ledger_dir()).list_all()
+            ]
+        }
+
+    @app.get("/api/ledger/{record_id}")
+    def get_ledger(record_id: str) -> dict[str, object]:
+        """一条台账的完整快照。
+
+        **路径参数名用 ASCII**（`record_id`，仿 `/api/drafts/{draft_id}`）——Starlette
+        的 `PARAM_REGEX` 只认 `[a-zA-Z_][a-zA-Z0-9_]*`，`{记录号}` 这种非 ASCII
+        花括号段匹配不到参数名，会被当成路径里的字面文本，导致这条路由永远
+        404（已用最小复现验证）。变量到手后仍按本文件惯例改叫「记录号」。
+        """
+        记录号 = record_id
+        entry = LedgerStore(_ledger_dir()).get(记录号)
+        if entry is None:
+            raise HTTPException(status_code=404, detail=f"台账记录不存在：{记录号}")
+        return ledger_to_dict(entry)
+
+    @app.post("/api/ledger/{record_id}/replay")
+    def replay_ledger(record_id: str) -> dict[str, object]:
+        """照台账重算，当场验证能不能复现出同一个数。
+
+        **把「可复现」从承诺变成事实。** 全程不碰实例库、不碰基础表库。
+
+        路径参数同上一个路由，用 ASCII 的 `record_id`，理由见 `get_ledger` 的 docstring。
+        """
+        记录号 = record_id
+        entry = LedgerStore(_ledger_dir()).get(记录号)
+        if entry is None:
+            raise HTTPException(status_code=404, detail=f"台账记录不存在：{记录号}")
+        try:
+            result = replay(entry)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        recorded = entry.结果
+        return {
+            "台账记的": {
+                "比准价格": list(recorded.比准价格),
+                "评估结果": recorded.评估结果,
+                "离散度": recorded.离散度,
+            } if recorded else None,
+            "重算得的": {
+                "比准价格": list(result.比准价格),
+                "评估结果": result.评估结果,
+                "离散度": result.离散度,
+            },
+            "一致": recorded == result,
+        }
+
     @app.post("/api/render")
     async def render_report(
         project: str = Form(...),
+        ledger: str | None = Form(default=None),
         files: list[UploadFile] | None = File(default=None),
     ) -> FileResponse:
         try:
@@ -593,6 +745,17 @@ def create_app() -> FastAPI:
         except (ValueError, FileNotFoundError) as exc:
             shutil.rmtree(workdir, ignore_errors=True)
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        # 落台账。**记不上不许把报告也搞挂**：报告是估价师要交的东西，台账是我们
+        # 要留的账，两者冲突时先保住报告——但要在日志里喊出来，不能静默吞掉。
+        try:
+            raw_ledger = json.loads(ledger) if ledger else None
+            记录号 = LedgerStore(_ledger_dir()).append(
+                _build_ledger_entry(parsed, raw_ledger)
+            )
+            logger.info("台账已记 %s", 记录号)
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError, OSError):
+            logger.exception("台账记录失败，报告照常生成：%s", parsed.report_no)
 
         logger.info("生成报告：%s", output.name)
         return FileResponse(
