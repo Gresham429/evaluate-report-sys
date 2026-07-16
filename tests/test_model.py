@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.model import Category, Project, Subject
+from src.model import Category, ConditionFactor, ConditionGroup, Project, Subject
 
 
 def _project(**overrides: object) -> Project:
@@ -65,3 +65,28 @@ def test_category_values() -> None:
     assert Category.AGRICULTURAL == "农用"
     assert Category.OFFICE == "办公"
     assert Category.COMMERCIAL == "商业"
+
+
+def test_condition_group_holds_ordered_per_factor_descriptions() -> None:
+    g = ConditionGroup(
+        name="区位状况",
+        factors=(
+            ConditionFactor(name="楼层", description="所在层数为第十二层和第十五层。"),
+            ConditionFactor(name="朝向", description="朝北。"),
+        ),
+    )
+    assert g.name == "区位状况"
+    assert [f.name for f in g.factors] == ["楼层", "朝向"]
+    assert g.factors[0].description == "所在层数为第十二层和第十五层。"
+
+
+def test_project_asset_condition_groups_defaults_empty() -> None:
+    # 既有 Project 构造不传该字段仍可用（增量落地，不一次性改所有构造点）。
+    p = Project(
+        category="办公", report_no="x", project_name="", client="", client_address="",
+        legal_rep="", purpose="", survey_date="", value_date="", materials="",
+        certificate_status="", owner="", address="", usage="", scale="", scope="",
+        current_status="", work_period="", issue_date="", surveyor="",
+        unit_price=1.0, dispersion=0.0, subjects=(),
+    )  # type: ignore[arg-type]
+    assert p.asset_condition_groups == ()

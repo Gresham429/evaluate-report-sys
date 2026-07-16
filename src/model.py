@@ -6,7 +6,7 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
-__all__ = ["Category", "Subject", "Project"]
+__all__ = ["Category", "Subject", "ConditionFactor", "ConditionGroup", "Project"]
 
 
 class Category(StrEnum):
@@ -31,6 +31,25 @@ class Subject:
     area: float
     unit_price: float
     annual_value: int
+
+
+@dataclass(frozen=True)
+class ConditionFactor:
+    """资产状况里一个因素的一行：手写描述 + 因素名。
+
+    描述是估价师逐因素手写的依据（实勘表 D 列），进报告、不进算术。
+    """
+
+    name: str
+    description: str
+
+
+@dataclass(frozen=True)
+class ConditionGroup:
+    """资产状况的一组（区位状况 / 实物状况 / 权益状况）及其逐因素行。"""
+
+    name: str
+    factors: tuple[ConditionFactor, ...]
 
 
 @dataclass(frozen=True)
@@ -60,6 +79,9 @@ class Project:
     unit_price: float
     dispersion: float
     subjects: tuple[Subject, ...]
+    # 报告（三）估价对象资产状况的三张表数据。默认空 → 既有构造点不受影响；
+    # 由 web 层/load_project 用基础表分组组装后填入。描述只进报告、不进算术。
+    asset_condition_groups: tuple[ConditionGroup, ...] = ()
 
     @property
     def is_land(self) -> bool:
