@@ -61,19 +61,45 @@ uv run python -m src   # 起本地服务，自动开浏览器
 
 ## 打包 Windows exe
 
-```bash
-uv run python build_exe.py
+PyInstaller 不支持交叉编译，只有在 Windows 上跑才产出 `.exe`。故走
+[GitHub Actions](.github/workflows/build-windows.yml)：
+
+```
+打 tag v*        → 自动构建 + 冒烟 + 发 Release（附交付 zip）
+Actions 页手动点 → 同上，只是不发 Release，包在 artifact 里
 ```
 
-产物在 `dist/`：exe + 外置的 `templates/`、`copy.yaml`。`data/` 首次运行时自动建。
+本地也能打（macOS/Linux 上产出对应平台的可执行文件，够验冻结行为，不能交付）：
 
-> PyInstaller 不支持交叉编译，`build_exe.py` 必须在 **Windows 机器**上运行才能产出
-> `.exe`。**尚未在 Windows 上实跑过**——这是交付前的最后一步。
+```bash
+uv run python build_exe.py
+uv run python tools/smoke_exe.py "dist/_package/估价报告系统/估价报告系统"
+```
+
+**冒烟测试不是装饰。** 「编译通过」与「exe 能用」是两回事——冻结路径那个 bug
+（数据每次关闭清零、一份报告也生成不了）编译一路绿灯、开发环境毫无征兆。
+[`tools/smoke_exe.py`](tools/smoke_exe.py) 真把产物跑起来、真出一份报告、真回头
+看磁盘，且验证过它确实拦得住那个 bug。
 
 **冻结路径**由 [`src/paths.py`](src/paths.py) 统一解析，别在别处再判断一次
 `sys.frozen`。onefile 运行时把代码解压到临时目录、退出时删掉，凡「用户能看到、
 能改、要留住」的东西（`copy.yaml`、`templates/`、`data/`）都必须挂在 exe 旁边。
 仓库布局与交付布局刻意一致，`tests/test_paths.py` 假装冻结盯着这条线。
+
+### 交付包里放什么
+
+```
+估价报告系统-windows.zip
+└── 估价报告系统/
+    ├── 估价报告系统.exe
+    ├── templates/        三份模板，可在 Word 里改
+    ├── copy.yaml         法定套话，改一处三类同步
+    └── 使用说明.md
+```
+
+**刻意不放 `data/`** ——那是估价师的实例库、草稿、基础表，程序首次运行时自建。
+塞进交付包的话，下次解压升级会把人家攒的实例库连同草稿一起盖掉：升级不该是
+数据事故。
 
 ## 交付形态
 

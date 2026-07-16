@@ -1,0 +1,68 @@
+# 打 Windows exe 并产出可交付 zip。
+#
+# PyInstaller 不支持交叉编译，只有在 Windows 机器上跑才产出 .exe。本工作流就是
+# 那台 Windows 机器。
+#
+# **冒烟测试是本流程的重点，不是装饰。** 「编译通过」与「exe 能用」是两回事：
+# 合并前那个冻结路径 bug——数据每次关闭清零、一份报告也生成不了——编译一路
+# 绿灯，开发环境毫无征兆。故这里必须真把 exe 跑起来、真出一份报告、真回头看
+# 磁盘。见 tools/smoke_exe.py。
+#
+# 单元测试不在这里跑：它们要 `案例素材/` 的三份真 Excel（含真实客户数据，
+# 已 gitignore，不上云）。没有素材时 conftest 会整体 skip——那样的「测试通过」
+# 是假的，不如不跑。**代码正确性在本地把关**（uv run pytest，320 项），
+# CI 只管产出与冒烟。
+
+name: 打包 Windows exe
+
+on:
+  push:
+    tags: ["v*"]          # 打 tag 即出正式包
+  workflow_dispatch:      # 也能手动点一下就构建，不必先打 tag
+
+permissions:
+  contents: write         # 打 tag 时创建 Release 需要
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 装 uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: 装依赖
+        run: uv sync --frozen
+
+      - name: 打包
+        run: uv run python build_exe.py
+
+      - name: 冒烟测试——验它真能用，不只是编译过了
+        run: uv run python tools/smoke_exe.py "dist/_package/估价报告系统/估价报告系统.exe"
+
+      - name: 上传交付包
+        uses: actions/upload-artifact@v4
+        with:
+          name: 估价报告系统-windows
+          path: dist/估价报告系统-windows.zip
+          if-no-files-found: error
+          retention-days: 90
+
+      # 打了 tag 才发 Release，手动触发只留 artifact。
+      - name: 发布 Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/估价报告系统-windows.zip
+          body: |
+            解压后双击 `估价报告系统.exe`，浏览器自动打开。
+
+            **首次使用须先导入基础表**：到「基础表」页，导入贵司的
+            「实勘表、比较法.xlsx」，三类各一次。详见包内 `使用说明.md`。
+
+            **升级时只替换 exe 与 templates/、copy.yaml，不要动 `data/`**
+            ——实例库、草稿、基础表各版本都在里面。
