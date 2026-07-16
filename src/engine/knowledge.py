@@ -35,6 +35,9 @@ class Factor:
     name: str
     levels: dict[str, int]
     coefficient: float
+    # 资产状况分组：区位状况/实物状况/权益状况。来自实勘表 A 列，导入时填。
+    # 仅供表单/报告分组展示，**不进算术、不进指纹**（fingerprint.canonical_form 不含它）。
+    group: str = ""
 
 
 @dataclass(frozen=True)

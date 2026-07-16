@@ -22,6 +22,7 @@ from datetime import datetime
 from pathlib import Path
 
 from src.engine.knowledge import Factor, Knowledge, extract_knowledge
+from src.extractor.condition import read_survey_conditions
 from src.extractor.survey import extract_survey
 
 # 取别名：本模块的 load()/_version_path() 对外的形参就叫 fingerprint（指纹是版本号，
@@ -88,6 +89,22 @@ class BaseTableStore:
             ValueError: 基础表缺失、分值行不合法，或 A1 标题无法识别类别。
         """
         knowledge = extract_knowledge(path)
+        group_of = {c.factor: c.group for c in read_survey_conditions(path)}
+        knowledge = Knowledge(
+            factors=tuple(
+                Factor(
+                    row=f.row,
+                    name=f.name,
+                    levels=f.levels,
+                    coefficient=f.coefficient,
+                    group=group_of.get(f.name, ""),
+                )
+                for f in knowledge.factors
+            ),
+            scores=knowledge.scores,
+        )
+        if any(f.group == "" for f in knowledge.factors):
+            logger.warning("基础表 %s 有因素未在实勘表分组里命中，将不分组显示", path.name)
         category = self._detect_category(path)
         digest = compute_fingerprint(knowledge)
         target = self._version_path(category, digest)
@@ -212,6 +229,7 @@ class BaseTableStore:
                     "名称": factor.name,
                     "档次": factor.levels,
                     "系数": factor.coefficient,
+                    "分组": factor.group,
                 }
                 for factor in knowledge.factors
             ],
@@ -242,6 +260,7 @@ class BaseTableStore:
                     name=str(f["名称"]),
                     levels={str(k): int(v) for k, v in dict(f["档次"]).items()},
                     coefficient=float(f["系数"]),
+                    group=str(f.get("分组", "")),
                 )
                 for f in factors
             ),

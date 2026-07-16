@@ -17,12 +17,34 @@ import openpyxl
 import pytest
 
 from src.engine.knowledge import BASE_SHEET, Factor, Knowledge, extract_knowledge
+from src.extractor.condition import read_survey_conditions
 from src.knowledge_base import BaseTableStore, canonical_form, fingerprint
 from src.model import Category
 from tests.conftest import CASES
 
 _COEFF_COL = 9  # 基础表 I 列
 _SCORES = (2, 1, 0, -1, -2)
+
+
+def _grouped_direct(case: str) -> Knowledge:
+    """直接读 Excel 并按实勘表分组——镜像 `BaseTableStore.import_from_excel` 的
+    分组转换，用作跟落库/取出结果比对的基准（分组：见 store.py 的导入落库处）。
+    """
+    knowledge = extract_knowledge(CASES[case])
+    group_of = {c.factor: c.group for c in read_survey_conditions(CASES[case])}
+    return Knowledge(
+        factors=tuple(
+            Factor(
+                row=f.row,
+                name=f.name,
+                levels=f.levels,
+                coefficient=f.coefficient,
+                group=group_of.get(f.name, ""),
+            )
+            for f in knowledge.factors
+        ),
+        scores=knowledge.scores,
+    )
 
 
 def _flat_copy(case: str, dest: Path) -> Path:
@@ -201,10 +223,15 @@ def test_fingerprint_covers_factor_name_and_scale() -> None:
 
 @pytest.mark.parametrize("case", ["农用", "办公", "商业"])
 def test_roundtrip_is_lossless(tmp_path: Path, case: str) -> None:
-    """存→取的 Knowledge 必须与直接读 Excel 的完全相等，含 row。"""
+    """存→取的 Knowledge 必须与直接读 Excel（含按实勘表分组）的完全相等，含 row。
+
+    `direct` 用 `_grouped_direct` 而非裸 `extract_knowledge`：导入会按实勘表把
+    factor.group 填上（见 store.py 的导入落库处），裸读不会，两者不再相等是
+    分组功能本身的预期结果，不是回归。
+    """
     store = BaseTableStore(tmp_path)
     result = store.import_from_excel(CASES[case], now=datetime(2026, 7, 16, 10, 0))
-    direct = extract_knowledge(CASES[case])
+    direct = _grouped_direct(case)
     loaded = store.load(Category(case), result.版本.指纹)
 
     assert loaded == direct
@@ -309,7 +336,7 @@ def test_reimport_restores_a_deleted_version_file(tmp_path: Path) -> None:
 
     again = store.import_from_excel(CASES["办公"], now=datetime(2026, 9, 1, 9, 0))
     assert target.exists(), "文件没了却不补，该版本永久取不出"
-    assert store.load(Category.OFFICE, first.版本.指纹) == extract_knowledge(CASES["办公"])
+    assert store.load(Category.OFFICE, first.版本.指纹) == _grouped_direct("办公")
     # 补文件不等于新版本：这版何时进的库是既成事实，不该被一次修复改写成今天。
     assert again.是否新版 is False
     assert again.版本.导入时间 == datetime(2026, 3, 1, 9, 0)
@@ -345,7 +372,7 @@ def test_load_tolerates_cosmetic_edits(tmp_path: Path) -> None:
     payload["因素"][0]["系数"] = int(payload["因素"][0]["系数"])  # 1.0 → 1
     target.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")  # 压成一行
 
-    assert store.load(Category.OFFICE, result.版本.指纹) == extract_knowledge(CASES["办公"])
+    assert store.load(Category.OFFICE, result.版本.指纹) == _grouped_direct("办公")
 
 
 def test_reimport_does_not_rewrite_file(tmp_path: Path) -> None:
