@@ -178,6 +178,15 @@
   td input { padding: .25rem .4rem; }
   td input.num { text-align: right; }
 
+  /* ── 台账：按报告编号折叠 ───────────────────────── */
+  tr.ledgerGroup { cursor: pointer; }
+  tr.ledgerGroup:hover td { background: var(--card); }
+  tr.ledgerGroup td.ind { width: 1.2rem; text-align: center; color: var(--ink-3); user-select: none; }
+  tr.ledgerExpand td { padding: 0 .5rem .6rem 1.8rem; border-bottom: 1px solid var(--rule); }
+  table.ledgerSub { width: 100%; margin-top: 0; }
+  table.ledgerSub td { border-bottom: 1px solid var(--rule); }
+  table.ledgerSub tr:last-child td { border-bottom: none; }
+
   /* ── 提示条 ─────────────────────────────────────── */
   .note, .warn, .err, .result {
     padding: .55rem .8rem; margin: .5rem 0; font-size: .82rem; border-left: 2px solid;
@@ -1287,6 +1296,16 @@ $('baseXlsx').addEventListener('change', async (event) => {
 
 // ── 台账页 ────────────────────────────────────────────────
 
+function ledgerSourceChip(e) {
+  return e.经引擎重算
+    ? '<span class="chip">引擎重算</span>'
+    : '<span class="chip" style="border-color:var(--amber);color:var(--amber)">取自 Excel</span>';
+}
+
+function ledgerTime(t) {
+  return esc(String(t ?? '').slice(0, 16).replace('T', ' '));
+}
+
 async function loadLedger() {
   const r = await fetch('/api/ledger');
   if (!r.ok) return;
@@ -1297,28 +1316,75 @@ async function loadLedger() {
     $('ledgerDetail').innerHTML = '<div class="note">还没有生成过报告。</div>';
     return;
   }
+
+  // 按报告编号分组：entries 已按生成时间新→旧。空报告编号（填一半就生成、
+  // 编号还没填）不参与合并——两份互不相干的半成品不能被收进同一组，故每条
+  // 空编号记录各自用自己的记录号当独立分组键，单独成组、单独成行。
+  // groups 按「首次遇到该 key」的顺序收集：因 entries 整体已新→旧，一个组
+  // 最新一条的位置就是该组在 entries 里最早出现的位置，故 groups 数组天然
+  // 已按「各组最新一条的时间」新→旧排列，无需再排序。
+  const groups = [];
+  const byKey = new Map();
+  for (const e of entries) {
+    const key = e.报告编号 ? ('no:' + e.报告编号) : ('entry:' + e.记录号);
+    let g = byKey.get(key);
+    if (!g) {
+      g = { 报告编号: e.报告编号, list: [] };
+      byKey.set(key, g);
+      groups.push(g);
+    }
+    g.list.push(e);
+  }
+
   $('ledgerList').innerHTML = `
     <thead><tr>
-      <th>生成时间</th><th>报告编号</th><th>经手人</th>
-      <th>基础表版本</th><th class="num">评估结果</th><th>来源</th><th></th>
+      <th></th><th>报告编号</th><th>次数</th>
+      <th>最新生成</th><th>经手人</th><th class="num">评估结果</th><th>来源</th>
     </tr></thead>
-    <tbody>${entries.map((e) => `
-      <tr>
-        <td class="num">${esc(e.生成时间.slice(0, 16).replace('T', ' '))}</td>
-        <td>${esc(e.报告编号 || '（未填编号）')}</td>
-        <td>${esc(e.经手人)}</td>
-        <td class="ver">${esc(e.基础表版本 || '—')}</td>
-        <td class="num">${e.评估结果 ?? '—'}</td>
-        <td>${e.经引擎重算
-              ? '<span class="chip">引擎重算</span>'
-              : '<span class="chip" style="border-color:var(--amber);color:var(--amber)">取自 Excel</span>'}</td>
-        <td><button type="button" class="mini" data-entry="${esc(e.记录号)}">查看</button></td>
-      </tr>`).join('')}</tbody>`;
+    <tbody>${groups.map((g) => {
+      const latest = g.list[0];
+      const rows = g.list.map((e) => `
+        <tr>
+          <td class="num">${ledgerTime(e.生成时间)}</td>
+          <td>${esc(e.经手人)}</td>
+          <td class="num">${e.评估结果 ?? '—'}</td>
+          <td>${ledgerSourceChip(e)}</td>
+          <td><button type="button" class="mini" data-entry="${esc(e.记录号)}">查看</button></td>
+        </tr>`).join('');
+      return `
+      <tr class="ledgerGroup">
+        <td class="ind">▸</td>
+        <td>${esc(g.报告编号 || '（未填编号）')}</td>
+        <td><span class="chip">共 ${g.list.length} 次</span></td>
+        <td class="num">${ledgerTime(latest.生成时间)}</td>
+        <td>${esc(latest.经手人)}</td>
+        <td class="num">${latest.评估结果 ?? '—'}</td>
+        <td>${ledgerSourceChip(latest)}</td>
+      </tr>
+      <tr class="ledgerExpand" hidden>
+        <td colspan="7"><table class="ledgerSub"><tbody>${rows}</tbody></table></td>
+      </tr>`;
+    }).join('')}</tbody>`;
 }
 
 $('ledgerList').addEventListener('click', async (event) => {
   const el = event.target;
-  if (!(el instanceof HTMLElement) || !el.dataset.entry) return;
+  if (!(el instanceof HTMLElement)) return;
+
+  // 折叠行：点它展开/收起同组的各次生成，与「查看」按钮的语义完全分开
+  // （「查看」始终只在 #ledgerDetail 展开完整快照，见下方不变的分支）。
+  const groupRow = el.closest('tr.ledgerGroup');
+  if (groupRow) {
+    const expandRow = groupRow.nextElementSibling;
+    if (expandRow instanceof HTMLElement && expandRow.classList.contains('ledgerExpand')) {
+      expandRow.hidden = !expandRow.hidden;
+      const ind = groupRow.querySelector('.ind');
+      if (ind) ind.textContent = expandRow.hidden ? '▸' : '▾';
+    }
+    return;
+  }
+
+  if (!el.dataset.entry) return;
   const detail = await (await fetch('/api/ledger/' + encodeURIComponent(el.dataset.entry))).json();
   const inst = (detail.实例 || []).map((i) =>
     `<li><span class="name">${esc(i.位置)}　<span class="hint" style="margin:0">成交价 ${i.成交价} ·
