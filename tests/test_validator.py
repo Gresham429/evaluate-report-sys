@@ -1,6 +1,9 @@
 """校验器测试。校验只提示，不阻断——是否为问题由估价师判断。"""
 
+from dataclasses import replace
+
 from src.extractor.project import load_project
+from src.model import ConditionFactor, ConditionGroup
 from src.validator.checks import validate
 from tests.conftest import CASES
 
@@ -90,3 +93,27 @@ def test_validate_works_without_excel() -> None:
     codes = {w.code for w in validate(project)}
     assert "EXTERNAL_REF" not in codes
     assert isinstance(validate(project), tuple)
+
+
+# ── 资产状况──────────────────────────────────────────────────
+
+def test_warns_empty_description_but_does_not_block() -> None:
+    """资产状况因素描述留空应提示，但不阻断校验。"""
+    project = load_project(CASES["办公"])
+    # 创建一个因素描述为空的资产状况
+    project_with_empty_desc = replace(
+        project,
+        asset_condition_groups=(
+            ConditionGroup(
+                name="区位状况",
+                factors=(
+                    ConditionFactor(name="楼层", description=""),
+                    ConditionFactor(name="位置", description="良好的位置"),
+                ),
+            ),
+        ),
+    )
+    warnings = validate(project_with_empty_desc)
+    assert any(w.code == "ASSET_CONDITION_INCOMPLETE" for w in warnings)
+    # 只提示，不阻断
+    assert isinstance(warnings, tuple)

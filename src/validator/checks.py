@@ -151,6 +151,24 @@ def _check_scale(project: Project) -> list[Warning]:
     ]
 
 
+def _check_asset_conditions(project: Project) -> list[Warning]:
+    """资产状况因素描述是否为空。
+
+    描述是估价师逐因素手写的依据，留空只提示但不阻断。
+    """
+    warnings: list[Warning] = []
+    for group in project.asset_condition_groups:
+        for factor in group.factors:
+            if not str(factor.description or "").strip():
+                warnings.append(
+                    Warning(
+                        code="ASSET_CONDITION_INCOMPLETE",
+                        message=f"{group.name}·{factor.name} 未填写描述",
+                    )
+                )
+    return warnings
+
+
 def _check_external_refs(path: Path) -> list[Warning]:
     """检测工作簿是否引用外部文件。
 
@@ -199,6 +217,7 @@ def validate(project: Project, path: Path | None = None) -> tuple[Warning, ...]:
     warnings += check_dispersion(project.dispersion)
     warnings += _check_table(project)
     warnings += _check_scale(project)
+    warnings += _check_asset_conditions(project)
     if path is not None:
         warnings += _check_external_refs(path)
     logger.debug("校验 %s：%d 条提示", path.name if path else "表单", len(warnings))
