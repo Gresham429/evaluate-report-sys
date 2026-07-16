@@ -536,7 +536,11 @@ async function saveDraft() {
     const r = await fetch('/api/drafts', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
-    if (r.ok) draftId = (await r.json()).id;
+    if (r.ok) {
+      draftId = (await r.json()).id;
+      // 存完刷新顶部列表——否则草稿在盘上有了、列表却纹丝不动，看着像没存上。
+      loadDraftList();
+    }
   } catch (err) {
     // 草稿存不上不该打断填写——真正的数据在眼前的表单里，提示一声即可。
     console.warn('草稿保存失败', err);
@@ -550,15 +554,21 @@ async function loadDraftList() {
   if (!drafts.length) { $('draftList').innerHTML = ''; return; }
   $('draftList').innerHTML = `
     <p class="hint" style="margin-top:.9rem">未完成的草稿（边填边存，可续填）：</p>
-    <ul class="plain">${drafts.map((d) => `
+    <ul class="plain">${drafts.map((d) => {
+      // 正在编辑的这条：标「编辑中」，不给「续填」「×」——你已经在它里面了，
+      // 续填自己没意义（还可能盖掉刚填的），删自己更不该。
+      const editing = d.id === draftId;
+      return `
       <li>
         <span class="name">${esc(d.报告编号 || '（未填报告编号）')}
           <span class="chip">${esc(d.类别 || '?')}</span>
+          ${editing ? '<span class="chip chip-seal">编辑中</span>' : ''}
         </span>
         <span class="ver">${esc(d.更新时间.slice(0, 16).replace('T', ' '))}</span>
-        <button type="button" class="mini" data-draft="${esc(d.id)}">续填</button>
-        <button type="button" class="mini" data-drop="${esc(d.id)}">×</button>
-      </li>`).join('')}</ul>`;
+        ${editing ? '' : `<button type="button" class="mini" data-draft="${esc(d.id)}">续填</button>
+        <button type="button" class="mini" data-drop="${esc(d.id)}">×</button>`}
+      </li>`;
+    }).join('')}</ul>`;
 }
 
 $('draftList').addEventListener('click', async (event) => {
