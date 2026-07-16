@@ -6,7 +6,7 @@ import yaml
 
 from src.prose.drift import normalise
 
-COPY_PATH = Path(__file__).resolve().parents[1] / "src" / "prose" / "copy.yaml"
+COPY_PATH = Path(__file__).resolve().parents[1] / "copy.yaml"
 
 
 def test_copy_yaml_exists() -> None:

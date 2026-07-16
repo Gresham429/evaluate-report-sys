@@ -28,13 +28,14 @@ from src.extractor.survey import extract_survey
 # 这个名字对调用方最自然），裸导入同名函数会在函数体内被形参遮蔽——`fingerprint(k)`
 # 会变成 `'str' object is not callable`。
 from src.knowledge_base.fingerprint import fingerprint as compute_fingerprint
+from src.paths import data_dir
 from src.model import Category
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["BaseTableStore", "VersionInfo", "ImportResult", "DEFAULT_STORE_DIR", "LEDGER_NAME"]
 
-DEFAULT_STORE_DIR = Path(__file__).resolve().parents[2] / "data" / "基础表"
+DEFAULT_STORE_DIR = data_dir() / "基础表"
 LEDGER_NAME = "台账.json"
 
 

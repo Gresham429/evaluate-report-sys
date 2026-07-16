@@ -23,12 +23,13 @@ from datetime import datetime
 from pathlib import Path
 
 from src.drafts.model import Draft, DraftInfo
+from src.paths import data_dir
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["DraftStore", "DEFAULT_DRAFT_DIR"]
 
-DEFAULT_DRAFT_DIR = Path(__file__).resolve().parents[2] / "data" / "草稿"
+DEFAULT_DRAFT_DIR = data_dir() / "草稿"
 
 
 class DraftStore:

@@ -1,17 +1,21 @@
 """本地网页应用。
 
-单机单用户，无状态，不联网。数据全程留在本机。
+单机单用户，不联网。数据全程留在本机。
 
-四步向导：① 选 Excel → ② 复核数据（可编辑）→ ③ 挑附件、排序 → ④ 生成下载。
-复核界面的修改只影响本次生成，不回写 Excel——Excel 是一张公式网，
-回写单个值会打断公式链、把计算结果变成死数（见 docs/使用说明.md）。
+三个页签：出报告（七步向导）、实例库、基础表。
+
+**表单是主，Excel 导入只是把表单一次填好。** 出一份报告可以全程不开 Excel：
+引擎要的三样——类别、基础表知识、估价对象档次——分别来自请求、基础表版本库、
+表单的 28 个下拉框（见 src/engine/inputs.py）。
+
+表单里的修改只影响本次生成，不回写 Excel——Excel 是一张公式网，回写单个值会
+打断公式链、把计算结果变成死数（见 docs/使用说明.md）。
 """
 
 import json
 import logging
 import os
 import shutil
-import sys
 import tempfile
 from dataclasses import asdict
 from pathlib import Path
@@ -144,13 +148,6 @@ def _project_from_payload(data: dict[str, object]) -> Project:
         dispersion=_to_float(data.get("dispersion")),
         subjects=subjects,
     )
-
-
-def _templates_dir() -> Path | None:
-    """打包成 exe 后模板外置于 exe 同目录；开发环境用 render() 自带的仓库内默认路径。"""
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent / "templates"
-    return None
 
 
 def _safe_filename(name: str) -> str:
@@ -590,7 +587,9 @@ def create_app() -> FastAPI:
         try:
             pages: tuple[AttachmentPage, ...] = collect(attachment_paths, workdir / "_pages")
             output = workdir / f"{_safe_filename(parsed.report_no)}.docx"
-            render(parsed, pages, output, templates_dir=_templates_dir())
+            # 模板路径由 render() 自己按 paths.templates_dir() 解析——冻结与否只在
+            # src/paths.py 判断一次，此处不再重复一份。
+            render(parsed, pages, output)
         except (ValueError, FileNotFoundError) as exc:
             shutil.rmtree(workdir, ignore_errors=True)
             raise HTTPException(status_code=400, detail=str(exc)) from exc

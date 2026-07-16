@@ -12,12 +12,11 @@ from typing import Any
 import yaml
 
 from src.model import Category, Project
+from src.paths import copy_path
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["load_copy", "compose", "needs_surveyor_credit", "price_unit", "area_unit"]
-
-_DEFAULT_COPY = Path(__file__).with_name("copy.yaml")
 
 
 def price_unit(category: Category) -> str:
@@ -75,7 +74,8 @@ def load_copy(path: Path | None = None) -> dict[str, Any]:
     """加载文案库。
 
     Args:
-        path: copy.yaml 路径，默认取包内文件。
+        path: copy.yaml 路径。默认取 `paths.copy_path()`——**exe 旁边而非包内**，
+            「改 copy.yaml 不用重新编译」这个承诺只有放在包外才成立。
 
     Returns:
         含 `boilerplate` 与 `conditional` 的字典。
@@ -83,7 +83,7 @@ def load_copy(path: Path | None = None) -> dict[str, Any]:
     Raises:
         FileNotFoundError: 文案库不存在。
     """
-    target = path or _DEFAULT_COPY
+    target = path or copy_path()
     if not target.exists():
         raise FileNotFoundError(f"文案库不存在：{target}")
     return _load_cached(target)

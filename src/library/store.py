@@ -11,13 +11,14 @@ from datetime import date
 from pathlib import Path
 
 from src.library.model import DatePrecision, StoredInstance
+from src.paths import data_dir
 from src.model import Category
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["InstanceStore", "DEFAULT_STORE_PATH"]
 
-DEFAULT_STORE_PATH = Path(__file__).resolve().parents[2] / "data" / "实例库.json"
+DEFAULT_STORE_PATH = data_dir() / "实例库.json"
 
 
 class InstanceStore:

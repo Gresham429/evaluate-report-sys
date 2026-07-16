@@ -14,6 +14,7 @@ from docxtpl import DocxTemplate, InlineImage
 
 from src.attachments.collector import AttachmentPage
 from src.model import Project
+from src.paths import templates_dir
 from src.prose.capital import to_capital
 from src.prose.composer import compose
 
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["build_context", "render", "DEFAULT_TEMPLATES_DIR", "ATTACHMENT_WIDTH_MM"]
 
-DEFAULT_TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
+DEFAULT_TEMPLATES_DIR = templates_dir()
 ATTACHMENT_WIDTH_MM = 160
 
 
