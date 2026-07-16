@@ -100,6 +100,7 @@ def compute(
     source: ComparisonInput,
     instances: Sequence[Instance],
     weights: Sequence[float],
+    method_name: str = METHOD_NAME,
 ) -> Result:
     """纯算：给定输入、现成的实例、权重，算出结果。**不碰实例库。**
 
@@ -107,18 +108,28 @@ def compute(
     解析市场状况指数」，本函数负责算。拆开是为了台账重放——快照里的实例本来就
     不在库里，不该为了算它而临时建一个库。
 
+    `method_name` 与 `weights` 同级——两者都是「当时算法/当时参数」，不是「今天的
+    默认」。默认取 `METHOD_NAME` 只为让 `compute_from_selection` 与走活链路的旧
+    测试一字不改；台账重放必须显式传 `entry.方法.名称`，理由见
+    `src/ledger/model.py` 的 `MethodUse` docstring：今天只注册了一种方法，但哪天
+    加了「市场比较法-2027」并改掉默认，重放旧台账若仍走默认就会静默换算法、
+    算出另一个数——这正是台账要存「方法」来防的事。
+
     Args:
         source: 引擎输入（类别 + 基础表知识 + 估价对象档次）。
         instances: 已配好市场状况指数的实例。
         weights: 各实例权重，长度须与 instances 一致。
+        method_name: 要用哪个比较法策略取算，按名字从注册表取。缺省为当前
+            默认方法 `METHOD_NAME`。
 
     Returns:
         Result（比准价格、评估结果、离散度）。
 
     Raises:
-        ValueError: 档次不在基础表中、权重数量不匹配，或取值导致比准价格算出 0。
+        ValueError: 方法名未注册、档次不在基础表中、权重数量不匹配，
+                    或取值导致比准价格算出 0。
     """
-    method = get_method(METHOD_NAME)
+    method = get_method(method_name)
     try:
         result = method.compute(source.subject_levels, instances, source.knowledge, weights)
     except ZeroDivisionError as exc:

@@ -6,6 +6,7 @@
 """
 
 import shutil
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
@@ -13,8 +14,9 @@ import pytest
 
 from src.engine.compute import METHOD_NAME, compute, compute_from_selection, default_weights
 from src.engine.inputs import from_excel
+from src.engine.knowledge import Knowledge
 from src.engine.methods import get_method
-from src.engine.methods.base import Instance
+from src.engine.methods.base import ComparisonMethod, Instance, Result
 from src.knowledge_base.fingerprint import fingerprint
 from src.ledger.model import BaseTableUse, InstanceUse, LedgerEntry, MethodUse
 from src.ledger.replay import replay
@@ -183,3 +185,60 @@ def test_replay_reproduces_every_golden(case: str, tmp_path: Path) -> None:
     store.path.unlink()
     assert replay(entry) == live
     assert replay(entry).评估结果 == pytest.approx(expected, abs=0.011)
+
+
+FAKE_METHOD_NAME = "测试用假方法"
+
+
+class _FakeMethod(ComparisonMethod):
+    """假比较法：不管输入是什么，永远返回同一个可预测的假结果。
+
+    存在的唯一理由：项目里目前只注册了「市场比较法-2026」一种方法，无论
+    `replay()` 读不读 `entry.方法`，用真方法重算都得到同一个数——现有测试
+    套件分辨不出这两种情形。注册这个假方法、把结果记成假方法名，就能造出
+    一种「读了 entry.方法 得假结果、不读则得真结果」的可分辨场景，从而
+    证明 `replay()` 确实按台账记的方法名取方法，而非悄悄走 `compute()`
+    的默认值。
+    """
+
+    name = FAKE_METHOD_NAME
+    version = "假-0"
+
+    def compute(
+        self,
+        subject_levels: dict[str, str],
+        instances: Sequence[Instance],
+        knowledge: Knowledge,
+        weights: Sequence[float],
+    ) -> Result:
+        return Result(比准价格=(9999.99,) * len(instances), 评估结果=9999.99, 离散度=0.0)
+
+
+def test_replay_uses_the_recorded_method_not_todays_default(tmp_path: Path) -> None:
+    """**这是能拦住「方法字段白存」这类回归的守卫测试。**
+
+    只注册一种真方法时，读不读 `entry.方法` 都算出同一个数，任何测试都分辨
+    不出来——这正是评审点出的漏洞。这里临时注册一个假方法，结果与真方法
+    判若两数，再把台账的 `方法` 改记成假方法名：`replay()` 若正确读取
+    `entry.方法.名称`，就该走假方法、得到 9999.99；若像修复前那样硬编码
+    默认方法，就仍会算出办公金样的 2.83。
+    """
+    from dataclasses import replace
+
+    from src.engine.methods import _REGISTRY, register_method
+
+    entry, _ = _live_entry(tmp_path)
+    assert entry.方法 is not None
+    assert entry.结果 is not None
+
+    register_method(_FakeMethod)
+    try:
+        fake_entry = replace(
+            entry, 方法=MethodUse(名称=FAKE_METHOD_NAME, 版本=_FakeMethod.version)
+        )
+        result = replay(fake_entry)
+        assert result.评估结果 == 9999.99, "没走假方法，说明 replay 没按 entry.方法 取方法"
+        assert result.评估结果 != entry.结果.评估结果
+    finally:
+        # 用完即删，别把假方法留在注册表里污染其余测试。
+        del _REGISTRY[FAKE_METHOD_NAME]

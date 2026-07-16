@@ -31,19 +31,31 @@ def replay(entry: LedgerEntry) -> Result:
     Raises:
         ValueError: 这份报告未经系统重算（数值取自 Excel），没有可重放的东西。
     """
-    if entry.基础表 is None or entry.估价对象档次 is None or entry.实例 is None:
+    if (
+        entry.基础表 is None
+        or entry.估价对象档次 is None
+        or entry.实例 is None
+        or entry.方法 is None
+        or entry.权重 is None
+    ):
         raise ValueError(
             f"报告「{entry.报告编号}」未经系统重算，数值取自 Excel，无可重放的计算过程"
         )
-    if entry.权重 is None:
-        raise ValueError(f"台账记录 {entry.记录号} 未记权重，无法重放")
 
     source = ComparisonInput(
         category=entry.类别,
         knowledge=entry.基础表.实际知识,
         subject_levels=dict(entry.估价对象档次),
     )
-    result = compute(source, [use.实例 for use in entry.实例], entry.权重)
+    # 方法名必须取台账记的那个，不取 compute() 今天的默认——理由见
+    # `src/ledger/model.py` 的 `MethodUse` docstring：今天只注册了一种方法，
+    # 但哪天加了新版本并改掉默认，走默认重放旧台账会静默换算法、算出另一个数。
+    result = compute(
+        source,
+        [use.实例 for use in entry.实例],
+        entry.权重,
+        method_name=entry.方法.名称,
+    )
     logger.info(
         "重放 %s：台账记 %s，重算得 %s",
         entry.记录号,
