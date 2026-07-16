@@ -627,6 +627,10 @@ async function openForm(category, { keepDraft = false } = {}) {
   renderFactors();
   await loadInstances(category);
   markStep('step-basic');
+  // 刷新草稿列表，让「编辑中」标记落到当前这份上。放这里而非只在 saveDraft 里，
+  // 是因为「续填」切换草稿走的是 openForm(keepDraft)、不触发保存——只在保存后刷新，
+  // 换草稿时标记就会赖在上一份上（表单已经换了，标记没跟上）。
+  loadDraftList();
 }
 
 $('newBtn').addEventListener('click', async () => {
