@@ -43,6 +43,20 @@ jobs:
       - name: 装依赖
         run: uv sync --frozen
 
+      # tag 与 src/version.py 不一致就失败。否则两者迟早各说各话——
+      # 2026-07-16 之前 pyproject 写 0.1.0 而 tag 已到 v1.0.1，正是如此。
+      - name: 校验 tag 与版本号一致
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          code_version=$(uv run python -c "from src.version import __version__; print(__version__)")
+          tag_version="${GITHUB_REF_NAME#v}"
+          echo "src/version.py = $code_version ； git tag = $tag_version"
+          if [ "$code_version" != "$tag_version" ]; then
+            echo "✗ 不一致。改 tag 或改 src/version.py，别让它们各说各话。"
+            exit 1
+          fi
+
       - name: 打包
         run: uv run python build_exe.py
 
