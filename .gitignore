@@ -3,6 +3,13 @@
 tests/goldens/*.docx
 tests/goldens/*.xlsx
 
+# 运行期数据：估价师本机产生的基础表版本、草稿、生成台账，可能含真实客户信息，
+# 绝不入库。data/实例库.json 是显式跟踪的种子数据（见下方 !），不受这条影响。
+data/基础表/
+data/草稿/
+data/生成台账/
+!data/实例库.json
+
 # 环境
 .env
 
