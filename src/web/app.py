@@ -31,8 +31,10 @@ from src.drafts.store import DEFAULT_DRAFT_DIR, DraftStore
 from src.engine.annual import annual_value
 from src.engine.compute import METHOD_NAME, compute_from_selection, default_weights
 from src.engine.inputs import ComparisonInput, from_excel
+from src.engine.knowledge import Knowledge
 from src.engine.methods import get_method
 from src.engine.methods.base import Instance, Result
+from src.extractor.condition import GROUP_PREFIXES, read_survey_conditions
 from src.extractor.project import load_project
 from src.knowledge_base.store import (
     DEFAULT_STORE_DIR as DEFAULT_BASE_TABLE_DIR,
@@ -48,7 +50,7 @@ from src.ledger.store import DEFAULT_LEDGER_DIR, LedgerStore
 from src.library.importer import import_from_excel
 from src.library.model import StoredInstance, make_id, parse_lease_start
 from src.library.store import DEFAULT_STORE_PATH, InstanceStore
-from src.model import Category, Project, Subject
+from src.model import Category, ConditionFactor, ConditionGroup, Project, Subject
 from src.prose.composer import area_unit, price_unit
 from src.renderer.render import render
 from src.validator.checks import check_dispersion, validate
@@ -107,17 +109,49 @@ def _to_float(value: object) -> float:
     raise ValueError(f"数值字段类型不对：{value!r}")
 
 
+def _asset_condition_groups_from_form(
+    knowledge: Knowledge, descriptions: dict[str, str]
+) -> tuple[ConditionGroup, ...]:
+    """按基础表因素的分组 + 表单逐因素描述，组装资产状况三组。
+
+    组顺序区位→实物→权益（`GROUP_PREFIXES`），组内按基础表因素序（而非表单
+    `descriptions` 的字典序——那是用户填写顺序，不代表基础表行序）。因素没有
+    分组（`f.group == ""`，如实勘表未覆盖到的因素）不进任何组，避免臆造归属。
+    因素在但描述缺失时给空串而不是丢弃该因素——校验层要靠「因素在、描述空」
+    才能提示「未填写」。
+
+    Args:
+        knowledge: 该类别当前使用的基础表知识（含每因素 `group`）。
+        descriptions: 表单提交的 `{因素名: 描述}`。
+
+    Returns:
+        按组聚合的 ConditionGroup 元组，空组丢弃。
+    """
+    ordered: dict[str, list[ConditionFactor]] = {g: [] for g in GROUP_PREFIXES}
+    for f in knowledge.factors:
+        if f.group not in ordered:
+            continue
+        ordered[f.group].append(ConditionFactor(f.name, descriptions.get(f.name, "")))
+    return tuple(
+        ConditionGroup(name=g, factors=tuple(fs)) for g, fs in ordered.items() if fs
+    )
+
+
 def _project_from_payload(data: dict[str, object]) -> Project:
     """把 /api/render 收到的（可能经用户编辑的）JSON 还原为 Project。
 
     Args:
-        data: 前端提交的项目字段字典，形状与 /api/extract 返回的 project 一致。
+        data: 前端提交的项目字段字典，形状与 /api/extract 返回的 project 一致，
+            另可带 `asset_conditions`（`{因素名: 描述}`，来自表单或实勘表预填）。
 
     Returns:
-        还原后的 Project。
+        还原后的 Project。`asset_conditions` 非空时，据当前类别的基础表知识
+        （分组、因素序）组装 `asset_condition_groups`；未带该字段则保持默认空，
+        不强求已导入基础表——描述是报告增量，不该拖累既有的无描述渲染路径。
 
     Raises:
-        ValueError: 字段缺失、类型不对，或 category 不是合法枚举值。
+        ValueError: 字段缺失、类型不对，category 不是合法枚举值，或带了
+            `asset_conditions` 却尚未导入过该类别的基础表。
     """
     raw_subjects = data.get("subjects")
     if not isinstance(raw_subjects, list):
@@ -134,8 +168,24 @@ def _project_from_payload(data: dict[str, object]) -> Project:
         )
         for s in raw_subjects
     )
+    category = Category(str(data.get("category", "")))
+    raw_conditions = data.get("asset_conditions")
+    descriptions = (
+        {str(k): str(v) for k, v in raw_conditions.items()}
+        if isinstance(raw_conditions, dict)
+        else {}
+    )
+    asset_condition_groups: tuple[ConditionGroup, ...] = ()
+    if descriptions:
+        try:
+            knowledge = BaseTableStore(_base_table_dir()).load(category)
+        except FileNotFoundError as exc:
+            raise ValueError(
+                f"带资产状况描述渲染但尚未导入过 {category.value} 类基础表：{exc}"
+            ) from exc
+        asset_condition_groups = _asset_condition_groups_from_form(knowledge, descriptions)
     return Project(
-        category=Category(str(data.get("category", ""))),
+        category=category,
         report_no=str(data.get("report_no", "")),
         project_name=str(data.get("project_name", "")),
         client=str(data.get("client", "")),
@@ -158,6 +208,7 @@ def _project_from_payload(data: dict[str, object]) -> Project:
         unit_price=_to_float(data.get("unit_price")),
         dispersion=_to_float(data.get("dispersion")),
         subjects=subjects,
+        asset_condition_groups=asset_condition_groups,
     )
 
 
@@ -563,6 +614,9 @@ def create_app() -> FastAPI:
             warnings = validate(project, path)
             source = from_excel(path)
             imported = BaseTableStore(_base_table_dir()).import_from_excel(path)
+            # 实勘表逐因素手写描述，读一次收进预填 payload——文件在 finally 里
+            # 就会被删，须在此处（workdir 还在）取完。
+            conditions = read_survey_conditions(path)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         finally:
@@ -578,6 +632,10 @@ def create_app() -> FastAPI:
             # 之后 /api/compute 用的就是表单里的这份，不再回头读 Excel。
             "subject_levels": source.subject_levels,
             "base_table": _version_payload(imported.版本),
+            # 资产状况逐因素描述（{因素名: 描述}），供表单预填每因素描述框。
+            # 与 subject_levels 同级——不进 Project 数据类，表单收口后随
+            # project.asset_conditions 一并提交，由 _project_from_payload 组装。
+            "asset_conditions": {c.factor: c.description for c in conditions},
             # 界面据此给一览表的表头标单位，不在 JS 里另写一份农用/房屋的判断。
             "单价单位": price_unit(project.category),
             "面积单位": area_unit(project.category),
@@ -604,6 +662,9 @@ def create_app() -> FastAPI:
             "factors": [
                 {
                     "名称": f.name,
+                    # 资产状况分组（区位状况/实物状况/权益状况），来自实勘表导入。
+                    # 表单据此把 28 个因素按组分节展示，不在 JS 里另编一份分组规则。
+                    "分组": f.group,
                     "系数": f.coefficient,
                     # 档次按分值从高到低给：基础表里 D..H 就是 2/1/0/-1/-2 的排法，
                     # 下拉框顺序跟着它，估价师看到的次序与 Excel 里一致。
