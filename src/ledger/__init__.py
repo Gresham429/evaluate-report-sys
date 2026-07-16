@@ -11,12 +11,15 @@ from src.ledger.model import (
     new_record_id,
     to_dict,
 )
+from src.ledger.store import DEFAULT_LEDGER_DIR, LedgerStore
 
 __all__ = [
     "BaseTableUse",
+    "DEFAULT_LEDGER_DIR",
     "Deviation",
     "InstanceUse",
     "LedgerEntry",
+    "LedgerStore",
     "MethodUse",
     "current_operator",
     "from_dict",
