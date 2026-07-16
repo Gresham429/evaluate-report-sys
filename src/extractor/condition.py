@@ -49,6 +49,11 @@ def _normalise_group(a_text: str) -> str | None:
     return None
 
 
+def _has_cjk(text: str) -> bool:
+    """检测文字中是否含有 CJK（汉字）。"""
+    return any('一' <= ch <= '鿿' for ch in text)
+
+
 def read_survey_conditions(path: Path) -> tuple[SurveyCondition, ...]:
     """读实勘表逐因素〔组, 因素, 描述〕，按出现顺序返回。
 
@@ -70,6 +75,9 @@ def read_survey_conditions(path: Path) -> tuple[SurveyCondition, ...]:
             current = group
         factor = _text(sheet, row, _COL_FACTOR)
         if current is None or not factor:
+            continue
+        # 跳过实勘表的模板残留行：因素名无 CJK 字符则为垃圾行（如名为 "0" 的行），非真实因素
+        if not _has_cjk(factor):
             continue
         out.append(SurveyCondition(current, factor, _text(sheet, row, _COL_DESC)))
     logger.debug("实勘表 %s 读到 %d 条逐因素描述", path.name, len(out))

@@ -428,3 +428,17 @@ Pre-flight：
 conftest 兜底四个存储目录、from_dict 读写不对称是想清楚的取舍非疏漏。
 
 **第四轮完成。8 任务 + 用户新增分组，全绿，可合并。**
+
+## 本会话 feat/asset-condition 进度（资产状况特性）
+BASE e284bf8
+Task 1 complete e284bf8..5de1b5d 数据模型
+Task 2 complete 5de1b5d..35fe93f 实勘表读取器（Minor: workbook.close 已裁定非缺陷）
+Task 3 complete 35fe93f..f38db81 因素分组不进指纹（Minor: store.load 文档串待更新）
+Task 4 complete f38db81..6317869 load_project 填充
+Task 5 impl 6317869..4b94bf2 报告表数据驱动+金样复现（复核中；子代理越权提交的 8b486bb 已 reset 丢弃，历史账本已恢复；新增 21 条 KNOWN_DEVIATIONS 待复核）
+
+Task 5 review (opus): 两大风险清白（21 条 KNOWN_DEVIATIONS 全为真源差、vMerge/行序 clean）。
+  Important: 资产状况表渲染出金样没有的多余因素行——农用有名为"0"的垃圾行（office 文案）。根因在 condition.py 读了每一行含垃圾。golden 测试只查 missing 不查 extra，故 43/43 仍绿但不代表 100
+Task 5 review (opus): 两大风险清白（21 条 KNOWN_DEVIATIONS 全为真源差、vMerge/行序 clean）。
+  Important: 资产状况表渲染出金样没有的多余因素行——农用有名为"0"的垃圾行（office 文案）。根因在 condition.py 读了每一行含垃圾。golden 只查 missing 不查 extra，故 43/43 仍绿但不代表 100%复现。
+  处理: (a) 现修垃圾行（factor 名无 CJK 即跳过）; (b) 另 3 个"多余但真实"因素（楼幢位置/维修费用承担/道路通达度）= 产品决策留晨间。
