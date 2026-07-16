@@ -107,6 +107,14 @@
   .step h2 .sub, .panel h2 .sub {
     font-weight: 400; font-size: .78rem; color: var(--ink-3); letter-spacing: 0;
   }
+  /* 每段可折叠：点标题收起本段内容，只留标题一行。序号（贰/叁）在 step-body 之外，
+     收起后仍在，一眼看出这是第几步。 */
+  .step > .step-body > h2 { cursor: pointer; user-select: none; }
+  .step > .step-body > h2::before {
+    content: '▾'; color: var(--ink-3); font-size: .8em; margin-right: .1rem;
+  }
+  .step.collapsed > .step-body > h2::before { content: '▸'; }
+  .step.collapsed > .step-body > :not(h2) { display: none; }
   .panel { padding: 1.5rem 0; border-bottom: 1px solid var(--rule); }
   .hint { color: var(--ink-3); font-size: .78rem; margin: .45rem 0 0; }
 
@@ -230,6 +238,8 @@
 
   /* ── 附件列表 ───────────────────────────────────── */
   ul#file-list, ul.plain { list-style: none; padding: 0; margin: .7rem 0 0; }
+  /* 草稿多了不至于把表单挤走：超过约 5 条就在自己这块里滚。 */
+  #draftList ul.plain { max-height: 15rem; overflow-y: auto; }
   ul#file-list li, ul.plain li {
     display: flex; align-items: center; gap: .4rem; padding: .38rem .5rem;
     border-bottom: 1px solid var(--rule); font-size: .82rem;
@@ -1457,6 +1467,20 @@ $('ledgerDetail').addEventListener('click', async (event) => {
     el.disabled = false;
     $('replayStatus').textContent = '';
   }
+});
+
+// ── 各段折叠 ──────────────────────────────────────────────
+// 点标题收起/展开本段。用事件委托绑在 document 上，覆盖出报告的贰-柒各步；
+// 排除壹「开始」——那里的草稿列表有自己的折叠开关（data-toggle-drafts），
+// 别让点它的标题也把整块开始区收掉。
+document.addEventListener('click', (event) => {
+  const t = event.target;
+  if (!(t instanceof HTMLElement)) return;
+  const h2 = t.closest('.step > .step-body > h2');
+  if (!h2) return;
+  const section = h2.closest('.step');
+  if (section.id === 'step-source') return; // 壹「开始」不整块折叠
+  section.classList.toggle('collapsed');
 });
 
 // ── 启动 ──────────────────────────────────────────────────
