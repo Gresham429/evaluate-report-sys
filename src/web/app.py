@@ -517,6 +517,7 @@ def create_app() -> FastAPI:
                     "起始日": i.起始日.isoformat() if i.起始日 else None,
                     "日期精度": i.日期精度.value,
                     "备注": i.备注,
+                    "因素档次": dict(i.因素档次),
                 }
                 for i in store.list_by_category(cat)
             ]
