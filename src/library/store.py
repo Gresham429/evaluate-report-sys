@@ -4,12 +4,12 @@ JSON 而非 SQLite：单机单用户、数据量小（预计数百条）、无�
 JSON 便于估价师直接查看、手改与备份，无需引入运维负担。
 """
 
-import json
 import logging
 from dataclasses import asdict
 from datetime import date
 from pathlib import Path
 
+from src.library.backend import InstanceBackend, LocalFileInstanceBackend
 from src.library.model import DatePrecision, StoredInstance
 from src.paths import data_dir
 from src.model import Category
@@ -24,27 +24,25 @@ DEFAULT_STORE_PATH = data_dir() / "实例库.json"
 class InstanceStore:
     """实例库。按类别分类，按起始日从新到旧列出。**不做任何推荐或筛选。**"""
 
-    def __init__(self, path: Path = DEFAULT_STORE_PATH) -> None:
-        self.path = path
+    def __init__(
+        self, path: Path = DEFAULT_STORE_PATH, *, backend: InstanceBackend | None = None
+    ) -> None:
+        self.path = path  # 保留：既有调用点/测试仍读它
+        # 持久化委托给可插拔后端；默认本地文件后端 → 既有行为一字不变。
+        self._backend: InstanceBackend = backend or LocalFileInstanceBackend(path)
         self._items: dict[str, StoredInstance] = {}
 
     def load(self) -> None:
-        """从磁盘加载。文件不存在时视为空库。"""
-        if not self.path.exists():
-            logger.debug("实例库不存在，视为空库：%s", self.path)
-            return
-        raw = json.loads(self.path.read_text(encoding="utf-8"))
-        self._items = {r["编号"]: self.from_dict(r) for r in raw}
-        logger.info("加载实例库 %s：%d 条", self.path, len(self._items))
+        """从后端加载整库。空库时 self._items 为空。"""
+        self._items = {
+            str(r["编号"]): self.from_dict(r) for r in self._backend.load()
+        }
+        logger.info("加载实例库：%d 条", len(self._items))
 
     def save(self) -> None:
-        """写回磁盘。UTF-8、缩进、不转义中文——须人类可读可手改。"""
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = [self.to_dict(i) for i in self._items.values()]
-        self.path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        logger.info("写入实例库 %s：%d 条", self.path, len(self._items))
+        """整库写回后端。序列化须人类可读可手改（本地后端保证）。"""
+        self._backend.save([self.to_dict(i) for i in self._items.values()])
+        logger.info("写入实例库：%d 条", len(self._items))
 
     def add(self, instance: StoredInstance) -> bool:
         """入库。
