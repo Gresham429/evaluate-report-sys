@@ -10,6 +10,10 @@ CASES = {
     "农用": MATERIALS / "农用" / "农用地实勘表、比较法.xlsx",
     "办公": MATERIALS / "办公" / "办公实勘表、比较法.xlsx",
     "商业": MATERIALS / "商业" / "商业实勘表、比较法.xlsx",
+    "住宅": MATERIALS / "住宅" / "住宅实勘表、比较法.xlsx",
+    "工业": MATERIALS / "工业" / "工业实勘表、比较法.xlsx",
+    "停车场用地": MATERIALS / "停车场用地" / "停车场用地实勘表、比较法.xlsx",
+    "建设用地": MATERIALS / "建设用地" / "建设用地实勘表、比较法.xlsx",
 }
 
 GOLDENS = {

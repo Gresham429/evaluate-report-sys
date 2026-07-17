@@ -37,6 +37,28 @@ def _text(sheet: object, row: int, col: int) -> str:
     return str(value).strip() if value is not None else ""
 
 
+def _normalize_market(subject_market: float, instance_market: float) -> float:
+    """把 Excel 的「交易日期/市场状况修正」归一到引擎的 100 基约定（term = 指数/100）。
+
+    两族 Excel 的这一项约定不同，本函数忠实复现各自的算法（见 docs/README §5）：
+
+    - 现有三类（农用/办公/商业）：估价对象 row-8 恒为 **100**（100 基状况指数），
+      Excel 修正 = 实例/对象 = `M8/L8` = `M8/100` → 直接用实例值，引擎 `实例/100` 复现。
+    - 新四类（住宅/工业/停车场/建设用地）：row-8 是**原始交易日期指数**（如 3.24），
+      Excel 修正 = 对象/实例 = `L8/M8` → 归一化 100 基值 = `100 × 对象/实例`，
+      使引擎 `归一值/100 = L8/M8` 精确复现。
+
+    ⚠️ **新四类的方向按当前提供的构造样例照搬，待真实案例 + 执业估价师复核**
+    （4 份新 Excel 的 row-8 值完全相同，疑似占位数据）。这条是 Approach A 下
+    「拿真实案例重锁算术金样」要复核的第一条。
+    """
+    if subject_market == 100.0:  # 100 基状况约定：估价对象恒为 100
+        return instance_market
+    if instance_market == 0.0:  # 防 0 除：实例日期指数缺失时按中性处理
+        return subject_market
+    return 100.0 * subject_market / instance_market
+
+
 def read_subject_levels(path: Path, category: Category) -> dict[str, str]:
     """读估价对象的因素档次（比较法表 D 列）。
 
@@ -79,12 +101,13 @@ def read_instances(path: Path, category: Category) -> tuple[Instance, ...]:
         price = sheet.cell(_PRICE_ROW, col).value
         trade = sheet.cell(_TRADE_ROW, idx_col).value
         market = sheet.cell(_MARKET_ROW, idx_col).value
+        market_val = float(market) if isinstance(market, (int, float)) else base
         instances.append(
             Instance(
                 位置=_text(sheet, _LOCATION_ROW, col),
                 成交价=float(price) if isinstance(price, (int, float)) else 0.0,
                 交易情况指数=float(trade) if isinstance(trade, (int, float)) else 100.0,
-                市场状况指数=float(market) if isinstance(market, (int, float)) else base,
+                市场状况指数=_normalize_market(base, market_val),
                 因素档次={
                     f.name: _text(sheet, f.row + _FACTOR_OFFSET, col) for f in knowledge.factors
                 },

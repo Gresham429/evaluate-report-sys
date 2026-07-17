@@ -55,5 +55,6 @@ def test_no_recommendation_fields_in_payload(client: TestClient) -> None:
 
 
 def test_unknown_category_returns_400(client: TestClient) -> None:
-    r = client.get("/api/instances", params={"category": "工业"})
+    # 用真正不在枚举里的类别；「工业」等已是合法类别（第六轮新增）。
+    r = client.get("/api/instances", params={"category": "别墅"})
     assert r.status_code == 400

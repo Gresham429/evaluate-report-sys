@@ -16,7 +16,7 @@
 import logging
 from decimal import ROUND_HALF_UP, Decimal
 
-from src.model import Category
+from src.model import Category, _LAND_CATEGORIES
 
 logger = logging.getLogger(__name__)
 
@@ -39,14 +39,14 @@ def annual_value(category: Category, area: float, unit_price: float) -> int:
     """按类别算一个估价对象的年租赁价值。
 
     Args:
-        category: 估价对象类别，决定要不要乘 365 天。
-        area: 面积。农用为亩，房屋类为㎡。
-        unit_price: 单价。农用为元/亩·年，房屋类为元/㎡·天。
+        category: 估价对象类别，决定要不要乘 365 天（土地类不乘）。
+        area: 面积。土地类为亩，房屋类为㎡。
+        unit_price: 单价。土地类为元/亩·年，房屋类为元/㎡·天。
 
     Returns:
         年租赁价值（元），取整到个位。
     """
     raw = area * unit_price
-    if category is not Category.AGRICULTURAL:
+    if category not in _LAND_CATEGORIES:  # 土地类按年计租，房屋类×365
         raw *= DAYS_PER_YEAR
     return _round_half_up(raw)
