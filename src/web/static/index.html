@@ -357,9 +357,11 @@
         <h2>选择可比实例 <span class="sub" id="instHint"></span></h2>
         <div class="note">
           按租期起始日从新到旧排列。系统不做可比性推荐——哪条更可比，由你的专业判断决定。<br>
-          市场状况指数须逐条填写，系统不推算、不给默认值。
+          市场状况指数须逐条填写，系统不推算、不给默认值。<br>
+          三条实例的权重默认各三分之一，可按专业判断调整；三者之和须为 1，不满足不能重算。
         </div>
         <div id="instList"></div>
+        <div class="err" id="weightError" hidden></div>
         <div class="actions">
           <button id="computeBtn" type="button" disabled>重算评估结果</button>
           <span class="status" id="computeStatus"></span>
@@ -991,13 +993,60 @@ function collectSelectedInstances() {
   });
 }
 
+// 权重列表与 collectSelectedInstances 用同一套遍历顺序，下标才能一一对应。
+function collectWeights() {
+  return Array.from(document.querySelectorAll('#instList .instRow')).flatMap((row) => {
+    const pick = row.querySelector('.instPick');
+    if (!(pick instanceof HTMLInputElement) || !pick.checked) return [];
+    const w = row.querySelector('.mktWeight');
+    return [w instanceof HTMLInputElement ? w.value.trim() : ''];
+  });
+}
+
+const WEIGHT_SUM_TOLERANCE = 1e-6; // 与后端 _WEIGHT_SUM_TOLERANCE 一致
+
+// 汇总当前已选实例的权重状态：是否三条都填了、是否都是数字、和是否为 1。
+// `invalid` 才是「须阻断提交」的信号——选不满 3 条时权重还没意义，不算 invalid，
+// 留给后端「须选满 3 条实例」的提示去说更准确的话。
+function weightState() {
+  const raw = collectWeights();
+  const filled = raw.length === 3 && raw.every((w) => w !== '');
+  const nums = raw.map(Number);
+  const numeric = filled && nums.every((n) => Number.isFinite(n));
+  const sum = numeric ? nums.reduce((a, b) => a + b, 0) : null;
+  const ok = numeric && Math.abs(sum - 1) <= WEIGHT_SUM_TOLERANCE;
+  return { raw, nums, filled, numeric, sum, ok, invalid: filled && !ok };
+}
+
+// 三个都是 0.3333，和只有 0.9999，过不了后端 1e-6 容差——默认权重必须精确到
+// 和为 1：前两条 0.3333，最后一条 0.3334，凑出 1.0000。哪条实例排最后，
+// 只看勾选顺序，跟哪条更可比无关。
+function defaultWeightFor(rank, count) {
+  return count === 3 && rank === 2 ? '0.3334' : '0.3333';
+}
+
+// 勾选变化时把新纳入的实例权重重置为默认——选的是哪三条变了，之前手填的
+// 权重跟着作废，逻辑上与「选择变了，重算结果过期」一致。
+function resetWeightDefaults() {
+  const checked = Array.from(document.querySelectorAll('#instList .instRow')).filter((row) => {
+    const pick = row.querySelector('.instPick');
+    return pick instanceof HTMLInputElement && pick.checked;
+  });
+  checked.forEach((row, i) => {
+    const w = row.querySelector('.mktWeight');
+    if (w instanceof HTMLInputElement) w.value = defaultWeightFor(i, checked.length);
+  });
+}
+
 let instanceTotal = 0;
 function updateInstHint() {
   const selected = collectSelectedInstances();
   const filled = selected.filter((s) => s.市场状况指数 !== '').length;
+  const w = weightState();
   $('instHint').textContent =
     `共 ${instanceTotal} 条 · 已选 ${selected.length}/3` +
-    (selected.length ? ` · 已填指数 ${filled}/${selected.length}` : '');
+    (selected.length ? ` · 已填指数 ${filled}/${selected.length}` : '') +
+    (w.numeric ? ` · 权重和 ${w.sum.toFixed(4)}` : '');
   document.querySelectorAll('#instList .instRow').forEach((row) => {
     const pick = row.querySelector('.instPick');
     row.classList.toggle('picked', pick instanceof HTMLInputElement && pick.checked);
@@ -1005,6 +1054,16 @@ function updateInstHint() {
   // 选择或填写变了，之前算出的结果已经过期——隐藏掉，逼用户重新点「重算」。
   $('computeError').hidden = true;
   $('computeResult').hidden = true;
+  const weightErr = $('weightError');
+  if (w.invalid) {
+    weightErr.textContent = w.numeric
+      ? `权重之和须为 1，当前 ${w.sum.toFixed(6)}——和≠1 不能重算。`
+      : `权重须为数字：${w.raw.join(' / ')}`;
+    weightErr.hidden = false;
+  } else {
+    weightErr.hidden = true;
+  }
+  $('computeBtn').disabled = w.invalid;
 }
 
 async function loadInstances(category) {
@@ -1042,12 +1101,21 @@ async function loadInstances(category) {
       <div class="instForm">
         <label>市场状况指数 <input type="text" class="mktIdx" placeholder="必填"></label>
         <label>判断依据 <input type="text" class="mktNote wide" placeholder="选填"></label>
+        <label>权重 <input type="text" class="mktWeight" value="0.3333" placeholder="必填"></label>
       </div>
     </div>`).join('')
     : `<div class="note">${esc(category)}类实例库还是空的。到「实例库」页手工录入，或从 Excel 批量导入。</div>`;
   updateInstHint();
 }
 
+// 勾选（非权重输入本身）变化时先把权重重置为默认，updateInstHint 才拿到
+// 重置后的值去算和——顺序靠 change 监听器的注册先后，必须排在下面两行前面。
+$('instList').addEventListener('change', (event) => {
+  const target = event.target;
+  if (target instanceof HTMLInputElement && target.classList.contains('instPick')) {
+    resetWeightDefaults();
+  }
+});
 $('instList').addEventListener('input', updateInstHint);
 $('instList').addEventListener('change', updateInstHint);
 
@@ -1057,6 +1125,9 @@ async function applyComputed(result) {
     base_table: baseTable?.指纹 || null,
     subject_levels: { ...subjectLevels },
     selected: collectSelectedInstances(),
+    // 台账要记「当时实际用的那组权重」，不是「今天的默认」——见后端
+    // _build_ledger_entry 的同名注释。这里能跑到，前面的重算必已用合法权重。
+    weights: weightState().nums,
     result: {
       比准价格: result.比准价格,
       评估结果: result.评估结果,
@@ -1082,6 +1153,16 @@ $('computeBtn').addEventListener('click', async () => {
   const resultEl = $('computeResult');
   errorEl.hidden = true;
   resultEl.hidden = true;
+  // 硬约束：和≠1（或非数字）就地阻断，不发请求。按钮平时已经据此禁用，
+  // 这里是防御性复核——万一 disabled 状态没跟上（如刚切换选择的同一时刻）。
+  const w = weightState();
+  if (w.invalid) {
+    errorEl.textContent = w.numeric
+      ? `权重之和须为 1，当前 ${w.sum.toFixed(6)}——已阻止提交。`
+      : `权重须为数字：${w.raw.join(' / ')}`;
+    errorEl.hidden = false;
+    return;
+  }
   btn.disabled = true;
   $('computeStatus').textContent = '计算中……';
   try {
@@ -1092,6 +1173,9 @@ $('computeBtn').addEventListener('click', async () => {
         subject_levels: subjectLevels,
         base_table: baseTable?.指纹,
         selected: collectSelectedInstances(),
+        // 选满 3 条且权重合法才带上；选不满时不送，让后端就着 selected
+        // 给出「须选满 3 条实例」这个更准确的错误，而不是权重数量不对。
+        ...(w.ok ? { weights: w.nums } : {}),
       }),
     });
     const body = await response.json();
@@ -1126,7 +1210,8 @@ $('computeBtn').addEventListener('click', async () => {
     errorEl.textContent = '请求失败：' + err;
     errorEl.hidden = false;
   } finally {
-    btn.disabled = false;
+    // 不能无条件解禁——请求这段时间里权重万一被改坏了，解禁就绕开了硬约束。
+    btn.disabled = weightState().invalid;
     $('computeStatus').textContent = '';
   }
 });
