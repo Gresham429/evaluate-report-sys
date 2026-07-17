@@ -324,6 +324,10 @@
             <option value="农用">农用</option>
             <option value="办公">办公</option>
             <option value="商业">商业</option>
+            <option value="住宅">住宅</option>
+            <option value="工业">工业</option>
+            <option value="停车场用地">停车场用地</option>
+            <option value="建设用地">建设用地</option>
           </select>
           <button id="newBtn" type="button">新建空白表单</button>
           <label class="filebtn">导入 Excel 预填<input type="file" id="xlsx" accept=".xlsx" hidden></label>
@@ -409,9 +413,15 @@
     <section class="step" id="step-generate" hidden>
       <div class="step-no">柒</div>
       <div class="step-body">
-        <h2>生成下载</h2>
+        <h2>生成下载 <span class="sub">两份文书各自下载，点哪个下哪个</span></h2>
         <div class="actions">
-          <button id="generate" class="primary">生成报告</button>
+          <label>委托评估收费合计（元）：
+            <input id="fee-total" type="number" min="0" step="1" value="2616" style="width:8em">
+          </label>
+        </div>
+        <div class="actions">
+          <button id="generate" class="primary">下载估价报告</button>
+          <button id="generate-agreement">下载委托评估协议书</button>
           <span class="status" id="generate-status"></span>
         </div>
       </div>
@@ -427,6 +437,10 @@
           <option value="农用">农用</option>
           <option value="办公" selected>办公</option>
           <option value="商业">商业</option>
+          <option value="住宅">住宅</option>
+          <option value="工业">工业</option>
+          <option value="停车场用地">停车场用地</option>
+          <option value="建设用地">建设用地</option>
         </select>
         <label class="filebtn">从 Excel 批量导入<input type="file" id="libXlsx" accept=".xlsx" hidden></label>
         <button id="newInstBtn" type="button">手工录入一条</button>
@@ -463,6 +477,10 @@
           <option value="农用">农用</option>
           <option value="办公" selected>办公</option>
           <option value="商业">商业</option>
+          <option value="住宅">住宅</option>
+          <option value="工业">工业</option>
+          <option value="停车场用地">停车场用地</option>
+          <option value="建设用地">建设用地</option>
         </select>
         <label class="filebtn">导入基础表<input type="file" id="baseXlsx" accept=".xlsx" hidden></label>
         <span class="status" id="baseStatus"></span>
@@ -1359,39 +1377,63 @@ $('attach-input').addEventListener('change', (event) => {
   renderFileList();
 });
 
-// ── 柒 生成 ───────────────────────────────────────────────
+// ── 柒 生成：两份文书各自下载 ─────────────────────────────
+
+// 公共下载器：POST 表单 → 取 docx blob → 触发浏览器下载。report 与协议书共用。
+async function downloadDoc(url, form, fallbackName) {
+  const status = $('generate-status');
+  const response = await fetch(url, { method: 'POST', body: form });
+  if (!response.ok) {
+    let detail = response.statusText;
+    try { detail = (await response.json()).detail; } catch (e) { /* 非 JSON 错误 */ }
+    status.className = 'status';
+    status.textContent = '生成失败：' + detail;
+    return;
+  }
+  const blob = await response.blob();
+  const disposition = response.headers.get('Content-Disposition') || '';
+  // 末尾的 i 不可省：Starlette 发的是小写 filename*=utf-8''…，区分大小写的话
+  // "utf-8''" 会被当成文件名的一部分。
+  const match = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+  const filename = match ? decodeURIComponent(match[1]) : fallbackName;
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = objectUrl;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(objectUrl);
+  status.textContent = '已下载：' + filename;
+  status.className = 'status done';
+}
 
 $('generate').addEventListener('click', async () => {
   if (!currentProject) return;
   const button = $('generate');
-  const status = $('generate-status');
   button.disabled = true;
-  status.className = 'status';
-  status.textContent = '生成中……';
+  $('generate-status').className = 'status';
+  $('generate-status').textContent = '生成中……';
   const form = new FormData();
   form.append('project', JSON.stringify(currentProject));
   if (lastCompute) form.append('ledger', JSON.stringify(lastCompute));
   attachmentFiles.forEach((f) => form.append('files', f));
   try {
-    const response = await fetch('/api/render', { method: 'POST', body: form });
-    if (!response.ok) {
-      status.textContent = '生成失败：' + (await response.json()).detail;
-      return;
-    }
-    const blob = await response.blob();
-    const disposition = response.headers.get('Content-Disposition') || '';
-    // 末尾的 i 不可省：Starlette 发的是小写 filename*=utf-8''…，区分大小写的话
-    // "utf-8''" 会被当成文件名的一部分。
-    const match = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
-    const filename = match ? decodeURIComponent(match[1]) : '估价报告.docx';
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    link.click();
-    URL.revokeObjectURL(url);
-    status.textContent = '已下载：' + filename;
-    status.className = 'status done';
+    await downloadDoc('/api/render', form, '估价报告.docx');
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$('generate-agreement').addEventListener('click', async () => {
+  if (!currentProject) return;
+  const button = $('generate-agreement');
+  button.disabled = true;
+  $('generate-status').className = 'status';
+  $('generate-status').textContent = '生成中……';
+  const form = new FormData();
+  form.append('project', JSON.stringify(currentProject));
+  form.append('fee_total', String($('fee-total').value || 0));
+  try {
+    await downloadDoc('/api/agreement', form, '委托评估协议书.docx');
   } finally {
     button.disabled = false;
   }
