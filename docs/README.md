@@ -5,8 +5,8 @@
 > 细节在各专题文档里，本页只给指路。
 
 - 更新：2026-07-17
-- 分支：`feat/asset-condition`（第五轮 + 4 条反馈，**未合并**，440 项测试全绿）；
-  `main` 停在 v1.0.2（Windows 交付修复）。合并前建议：真机点一遍 UI + 跑 `/code-review ultra`。
+- 分支：`main`（干净，440 项测试全绿）——第五轮 + 4 条反馈**已合并**（`feat/asset-condition` 已并入）。
+  ⚠️ **交付前（打 tag `v*`）须补做**：真机点一遍第五轮/反馈的 UI + 跑 `/code-review ultra`（合并时用户决定先合、未做）。
 - 远端：`git@github.com:Gresham429/evaluate-report-sys.git`（私有）
 
 ## 0. 一句话
@@ -15,7 +15,7 @@
 格式的 Word 估价报告，并给每次生成留一条**可复现的台账**。单机运行，不联外网，
 数据全程留在本机。支持**农用 / 办公 / 商业**三类。
 
-## 1. 现状：五轮 + 一轮打磨（前四轮+打磨在 main；第五轮 + 反馈在 `feat/asset-condition`）
+## 1. 现状：五轮 + 一轮打磨，都在 main
 
 | 轮次 | 做了什么 | 关键文档 |
 |---|---|---|
@@ -24,14 +24,14 @@
 | 三 | 表单输入 + 基础表版本管理（出报告可全程不开 Excel） | [决策记录](superpowers/specs/2026-07-16-表单输入与基础表版本管理-决策记录.md) |
 | 四 | 报告生成台账（存快照、照台账重算） | [design](superpowers/specs/2026-07-16-报告生成台账与知识权威-design.md) |
 | 打磨 | 交付 exe（GitHub Actions）、台账分组、草稿/表单折叠、若干实测 bug | §6 + v1.0.2 |
-| **五（未合并）** | **估价对象资产状况**：逐因素手写描述贯通表单→报告三张表→台账 | [design](superpowers/specs/2026-07-16-估价对象资产状况-design.md) / [plan](superpowers/plans/2026-07-16-估价对象资产状况.md) |
-| **反馈（未合并）** | **权重可调**（和=1、分数输入）、**单份偏离**（系数按报告可调）、**实例数据可视化** | §6 末 + `.superpowers/sdd/overnight-followups.md` |
+| **五** | **估价对象资产状况**：逐因素手写描述贯通表单→报告三张表→台账 | [design](superpowers/specs/2026-07-16-估价对象资产状况-design.md) / [plan](superpowers/plans/2026-07-16-估价对象资产状况.md) |
+| **反馈** | **权重可调**（和=1、分数输入）、**单份偏离**（系数按报告可调）、**实例数据可视化** | §6 末 + `.superpowers/sdd/overnight-followups.md` |
 
-**端到端已验证**（真浏览器 + Windows exe 冒烟）：导入基础表 → 出报告 → 选实例重算 →
+**端到端已验证**（真浏览器 + Windows exe 冒烟，**限前四轮**）：导入基础表 → 出报告 → 选实例重算 →
 应用 → 生成 docx → 台账「照此重算」复现出同一个数。三类金样精确复现。
 
-> **第五轮 + 反馈尚未真机点过 UI**（我方无浏览器工具，是静态+API+Playwright 部分核验）。
-> 合并前**必须真人点一遍**——§5 的 UI 坑单元测试拦不住。逐因素描述 / 系数框+范围软提示 /
+> ⚠️ **第五轮 + 反馈的 UI 尚未真机点过**（合并时是静态+API+Playwright 部分核验）。已在 main，但
+> **交付前（打 tag `v*`）必须真人点一遍**——§5 的 UI 坑单元测试拦不住。逐因素描述 / 系数框+范围软提示 /
 > 权重框（分数、和≠1 挡生成）/ 选实例展开看实例档次，都要点到。
 
 ## 2. 铁律：改任何东西之前必须知道，碰了就是回归
@@ -95,7 +95,7 @@ src/
 ```bash
 uv sync
 uv run python -m src          # 起本地服务，自动开浏览器 http://127.0.0.1:8765
-uv run pytest                 # 440 项（feat/asset-condition）
+uv run pytest                 # 440 项
 uv run mypy src/              # 干净
 uv run ruff check .           # 干净
 ```
@@ -161,7 +161,7 @@ PyInstaller 不支持交叉编译，只有 windows runner 能出 .exe。见根 R
     （`farmland/office/commercial.docx`），交付名（exe/内层目录）一并 ASCII 化；
     补「解压交付 zip 再冒烟」堵住冒烟盲区。见 §5 的坑 7/8/9。
 
-**（第五轮 + 反馈，在 `feat/asset-condition`，未合并）**——逐个决策由用户拍板：
+**（第五轮 + 反馈，已合并 main）**——逐个决策由用户拍板：
 - **资产状况**：报告（三）三张表从「死金样文字」改成逐因素数据驱动，出实勘表手写描述；
   因素分组从实勘表 A 列读、不硬编码；三张表用 docxtpl `{%tr%}` 行循环（`tools/condition_tables.py`），
   组标签列 vMerge 用 `{% if loop.first %}restart{% else %}continue{% endif %}`（避开 TOC 书签重复）。
