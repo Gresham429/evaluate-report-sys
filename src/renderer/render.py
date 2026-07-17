@@ -184,6 +184,15 @@ def build_context(project: Project, pages: Sequence[AttachmentPage]) -> dict[str
         "subjects_narrative": _subjects_narrative(project),
         "has_attachments": len(pages) > 0,
     }
+    context["区位因素"] = []
+    context["实物因素"] = []
+    context["权益因素"] = []
+    group_keys = {"区位状况": "区位因素", "实物状况": "实物因素", "权益状况": "权益因素"}
+    for group in project.asset_condition_groups:
+        key = group_keys.get(group.name)
+        if key is None:
+            continue
+        context[key] = [{"name": f.name, "description": f.description} for f in group.factors]
     context.update(compose(project))
     return context
 

@@ -43,7 +43,7 @@
 
 ```bash
 uv sync
-uv run pytest          # 375 项
+uv run pytest          # 440 项（feat/asset-condition 分支）
 uv run mypy src/
 uv run ruff check .
 uv run python -m src   # 起本地服务，自动开浏览器

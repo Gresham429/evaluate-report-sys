@@ -212,6 +212,35 @@ def test_new_rejects_result_without_base_table() -> None:
         )
 
 
+def test_ledger_entry_roundtrips_asset_conditions() -> None:
+    """资产状况是独立可选字段——不参与「六者同生同灭」，随台账整份存取不丢。"""
+    entry = LedgerEntry.new(
+        报告编号="正恒评报字[2026]第F071号",
+        类别=Category.OFFICE,
+        基础表=None,
+        估价对象档次=None,
+        实例=None,
+        方法=None,
+        权重=None,
+        结果=None,
+        一览表=(),
+        资产状况=({"组": "区位状况", "因素": [{"名称": "楼层", "描述": "十二层"}]},),
+        now=WHEN,
+        经手人="张三@ZH-PC-03",
+    )
+    back = from_dict(to_dict(entry))
+    assert back.资产状况 is not None
+    assert back.资产状况[0]["组"] == "区位状况"
+    assert back == entry
+
+
+def test_old_entry_without_asset_conditions_loads_as_none() -> None:
+    """旧台账文件压根没有「资产状况」这个键——不能因为加了新字段就读不出来。"""
+    data = to_dict(_entry())
+    del data["资产状况"]
+    assert from_dict(data).资产状况 is None
+
+
 def test_new_rejects_base_table_without_result() -> None:
     """反过来，有基础表、无结果同样不一致：重算的输入在，输出却不在。"""
     knowledge = _knowledge()

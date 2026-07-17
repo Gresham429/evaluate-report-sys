@@ -50,6 +50,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.model import Category  # noqa: E402
 from src.prose.drift import normalise  # noqa: E402
 from src.renderer.render import TEMPLATE_FILENAMES  # noqa: E402
+from tools.condition_tables import parameterize_condition_tables  # noqa: E402
 from tools.table_loop import parameterize_subject_tables  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -403,6 +404,7 @@ def build(tag: str, golden: Path, target: Path) -> None:
                     xml = normalise_document_paragraphs(xml)
                     xml = substitute_document_paragraphs(xml, SUBSTITUTIONS[tag])
                     xml = parameterize_subject_tables(xml)
+                    xml = parameterize_condition_tables(xml)
                     xml = _strip_embedded_pictures(xml)
                     xml = _inject_attachment_loop(xml)
                     data = xml.encode("utf-8")

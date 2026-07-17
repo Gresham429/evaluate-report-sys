@@ -428,3 +428,49 @@ Pre-flight：
 conftest 兜底四个存储目录、from_dict 读写不对称是想清楚的取舍非疏漏。
 
 **第四轮完成。8 任务 + 用户新增分组，全绿，可合并。**
+
+## 本会话 feat/asset-condition 进度（资产状况特性）
+BASE e284bf8
+Task 1 complete e284bf8..5de1b5d 数据模型
+Task 2 complete 5de1b5d..35fe93f 实勘表读取器（Minor: workbook.close 已裁定非缺陷）
+Task 3 complete 35fe93f..f38db81 因素分组不进指纹（Minor: store.load 文档串待更新）
+Task 4 complete f38db81..6317869 load_project 填充
+Task 5 impl 6317869..4b94bf2 报告表数据驱动+金样复现（复核中；子代理越权提交的 8b486bb 已 reset 丢弃，历史账本已恢复；新增 21 条 KNOWN_DEVIATIONS 待复核）
+
+Task 5 review (opus): 两大风险清白（21 条 KNOWN_DEVIATIONS 全为真源差、vMerge/行序 clean）。
+  Important: 资产状况表渲染出金样没有的多余因素行——农用有名为"0"的垃圾行（office 文案）。根因在 condition.py 读了每一行含垃圾。golden 测试只查 missing 不查 extra，故 43/43 仍绿但不代表 100
+Task 5 review (opus): 两大风险清白（21 条 KNOWN_DEVIATIONS 全为真源差、vMerge/行序 clean）。
+  Important: 资产状况表渲染出金样没有的多余因素行——农用有名为"0"的垃圾行（office 文案）。根因在 condition.py 读了每一行含垃圾。golden 只查 missing 不查 extra，故 43/43 仍绿但不代表 100%复现。
+  处理: (a) 现修垃圾行（factor 名无 CJK 即跳过）; (b) 另 3 个"多余但真实"因素（楼幢位置/维修费用承担/道路通达度）= 产品决策留晨间。
+Task 5: complete (impl 6317869..4b94bf2 + junk fix bc7f66d, opus review clean, golden green; DEFERRED product decision: render-all vs curate factor set)
+Task 6: committed 0c949fd (web wiring, app.py+test_web.py only, in-scope; tests 22 green, mypy+ruff clean). NOTE: implementer ran away (looped on Monitor after committing) — TaskStop killed it; drift.py in old task-6-report was a stale prior-round leftover, not off-scope work. Review pending.
+Task 6: complete (commit 0c949fd, spec ✅ all 3 sub-parts, arithmetic boundary clean, quality approved).
+Task 7: complete-pending-review (commit 0c949fd..e2dfdf5, ledger optional 资产状况 field, replay untouched, tests 44+golden green). Note: brief test-helper names didn't exist, implementer substituted equivalent tests (verify in review).
+Task 7: complete (commit e2dfdf5, spec ✅, substituted-tests faithful, invariant+replay independent/untouched).
+Task 8: complete-pending-review (commit e2dfdf5..f8bd312, validator ASSET_CONDITION_INCOMPLETE warn-only, 12 validator+13 golden green).
+Task 8: complete (commit f8bd312, spec ✅ quality ✅ warn-only registered).
+Task 9: complete (commit 54a3f72 index.html 表单资产状况分组逐因素; 子代理 spend-limit 挂前已浏览器验证+截图；控制器直接验证 full suite 398 green + 提交). Ruff F401 pre-existing 已修 (下一提交).
+资产状况特性 9 任务全部完成+提交，全套 398 绿，mypy+ruff 干净。
+DEFERRED 晨间决策: T5 资产状况表渲染全部真实因素 vs 裁到历史金样子集（见 overnight-followups.md）。
+Decision ①: A 全渲染（当前行为，无需改代码）。
+Decision ②(#1 weights): 做，和≠1 挡住。#1a 后端核心 commit 223d4ac（pitfall test RED→GREEN，406 green，golden 26 green）。#1b 前端待做。
+Decision ③(#2 系数): a+c 结合——系数可按报告灵活变、Excel J列"调整范围"已存在(如2-4/1-3)。发现 I系数有时在J范围外→J当软提示不硬卡、默认=当前I。待用户确认软提示方案。同权重坑：存实际系数/replay用存的。排在#1后。
+#1a review (sonnet): spec ✅, pitfall-test faithful (proves a+b, reran PASS), golden 26 green. Medium: _build_ledger_entry stores raw["weights"] without count/sum validation → 只增不改 ledger could persist corruption from a buggy frontend. Fixing before #1b.
+#1a fix: complete (commit e70daa8, ledger weight validation, 46 tests green incl pitfall+golden). #1 backend fully closed.
+Now dispatching #1b (weights frontend).
+#1b weights frontend: commit 5c79288, 408 green, ruff+mypy clean, server killed. No Playwright→static verify only. UX note: default weights 0.3333/0.3333/0.3334 (asymmetric) to clear 1e-6 tol — flag to user. Review pending (focus: weights sent to BOTH /api/compute AND ledger blob).
+#1b review (sonnet): spec ✅ quality approved. CRITICAL confirmed: weights reach /api/render ledger blob (index.html:1130 lastCompute + :1263 ledger append; backend app.py:359 reads+validates). Block is real (disabled+click recheck). No regressions. #1 权重 FULLY DONE (223d4ac+e70daa8+5c79288, all reviewed, pitfall closed live path, golden green).
+Now #2 系数 = 单份偏离 (§7). Ledger BaseTableUse.偏离 shape already exists (currently ()).
+Decision #2 approval: A (自由改、不卡审批、记理由留痕). replay.py:47 uses entry.基础表.实际知识 → 存 overridden 实际知识 即自动复现，坑用现有机制关。偏离 记 Deviation(因素/字段/原值/现值/理由). 基线版本+实际指纹=基线(不另立版本). J不进指纹.
+Splitting #2: #2a knowledge J-range + override helper; #2b web/ledger偏离/replay/pitfall; #2c frontend.
+#2a: done (commit 6464e01, 431 green, golden 12 byte-identical, fingerprint unchanged 3-ways, mypy+ruff clean). Read J列调整范围 into Factor.调整范围 (not in fingerprint), store persists, apply_coefficient_overrides helper. Self-caught+fixed store group-rebuild dropping new field. Review pending (focus: fingerprint out + store fix).
+#2a review (haiku): spec ✅ quality approved, fingerprint confirmed OUT (test_fingerprint_unchanged_by_range + pinned 95d043e06567), store-rebuild carries ALL fields (line 182 调整范围=f.调整范围). #2a DONE.
+Now #2b: web coefficient-overrides → overridden 实际知识 → 偏离 → replay pitfall test.
+#2b: done (commit c42fd0c0, per-report coefficient overrides 单份偏离). Pitfall test proves replay reproduces overridden 2.93 not base 2.83. Soft-warn COEFFICIENT_OUT_OF_RANGE (200), unknown-factor 400/skip-ledger. Full suite 440, golden 26, mypy+ruff clean. NOTE: reason-field payload shape (偏离理由/coefficient_override_reasons) is implementer's guess — #2c frontend must match #2b's exact contract.
+#2b review (sonnet): spec ✅ all 3, quality approved (1 Low: Deviation docstring "今天恒空" now stale→fix at cleanup). Pitfall faithful (reran, proves replay COMPUTES with overridden). 实际指纹==基线版本 confirmed. Golden 26 reran green. #2 BACKEND fully done (#2a 6464e01 + #2b c42fd0c0, both reviewed).
+Remaining: FE-1 #2c coefficient UI (match #2b contract: coefficient_overrides field + reason); FE-2 ⑤ instance tiers (/api/instances +1) + weight fraction input. Then cleanup+consolidate.
+FE-1 #2c: done (commit 60b1403, coefficient inputs+range hints, out-of-range non-blocking warn). 440 green, Playwright-verified, server killed. Justified scope +1: app.py /api/factors now returns 调整范围 (genuine gap from #2a — field existed but endpoint never exposed it). Review pending: coefficient_overrides→BOTH endpoints + app.py 1-liner.
+FE-1 #2c review (haiku): spec ✅ quality approved. Ledger-wiring CONFIRMED (coefficient_overrides + 偏离理由 in lastCompute 1295-1296 → /api/render). Unchanged-not-sent verified. app.py +1 purely additive. #2 单份偏离 FULLY DONE (6464e01+c42fd0c0+60b1403, all reviewed).
+Last: FE-2 = ⑤ instance 因素档次 (/api/instances +1 + expand render) + weight fraction input "1/3" + cleanup Deviation docstring.
+FE-2: done (commit aa6d7b1, 3 files: /api/instances+因素档次, index.html tiers-render+fraction-input, Deviation docstring). 440 green, ruff+mypy clean, server killed, no browser→static/API verify. Review pending (fraction-parse safety no-eval, 因素档次 additive, no regression).
+FE-2 review (haiku): spec ✅ quality approved. Fraction-parse SECURE (regex+Number, no eval, div-0 guarded). 因素档次 additive, docstring comment-only, no regression. 440 green. ALL follow-ups (#1/#2/#4/⑤/fraction) DONE+reviewed. ④ deferred (DingTalk).

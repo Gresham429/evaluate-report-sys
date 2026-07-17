@@ -29,10 +29,17 @@ from src.attachments.collector import AttachmentPage, collect
 from src.drafts.model import Draft
 from src.drafts.store import DEFAULT_DRAFT_DIR, DraftStore
 from src.engine.annual import annual_value
-from src.engine.compute import METHOD_NAME, compute_from_selection, default_weights
+from src.engine.compute import (
+    METHOD_NAME,
+    SELECTION_SIZE,
+    compute_from_selection,
+    default_weights,
+)
 from src.engine.inputs import ComparisonInput, from_excel
+from src.engine.knowledge import Knowledge, apply_coefficient_overrides
 from src.engine.methods import get_method
 from src.engine.methods.base import Instance, Result
+from src.extractor.condition import GROUP_PREFIXES, read_survey_conditions
 from src.extractor.project import load_project
 from src.knowledge_base.store import (
     DEFAULT_STORE_DIR as DEFAULT_BASE_TABLE_DIR,
@@ -41,17 +48,17 @@ from src.knowledge_base.store import (
     BaseTableStore,
     VersionInfo,
 )
-from src.ledger.model import BaseTableUse, InstanceUse, LedgerEntry, MethodUse
+from src.ledger.model import BaseTableUse, Deviation, InstanceUse, LedgerEntry, MethodUse
 from src.ledger.model import to_dict as ledger_to_dict
 from src.ledger.replay import replay
 from src.ledger.store import DEFAULT_LEDGER_DIR, LedgerStore
 from src.library.importer import import_from_excel
 from src.library.model import StoredInstance, make_id, parse_lease_start
 from src.library.store import DEFAULT_STORE_PATH, InstanceStore
-from src.model import Category, Project, Subject
+from src.model import Category, ConditionFactor, ConditionGroup, Project, Subject
 from src.prose.composer import area_unit, price_unit
 from src.renderer.render import render
-from src.validator.checks import check_dispersion, validate
+from src.validator.checks import check_coefficient_overrides, check_dispersion, validate
 
 logger = logging.getLogger(__name__)
 
@@ -107,17 +114,106 @@ def _to_float(value: object) -> float:
     raise ValueError(f"数值字段类型不对：{value!r}")
 
 
+_WEIGHT_SUM_TOLERANCE = 1e-6
+
+
+def _parse_weights(raw: object) -> tuple[float, ...] | None:
+    """解析请求里的权重列表；字段缺失（`None`）返回 `None`，交调用方取默认权重。
+
+    可调权重上线后的唯一入口：**和必须为 1**，数量须与选中实例数一致
+    （今天恒为 `SELECTION_SIZE`）。不合法一律 400，不静默夹紧或归一化——
+    权重是估价师的专业判断，系统不替他改。
+
+    Raises:
+        HTTPException: 数量不对、某项不是数字，或总和偏离 1 超过容差。
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, list) or len(raw) != SELECTION_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"权重须为 {SELECTION_SIZE} 个数字，实收：{raw!r}",
+        )
+    try:
+        weights = tuple(float(w) for w in raw)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f"权重不是有效数字：{raw!r}") from exc
+    total = sum(weights)
+    if abs(total - 1.0) > _WEIGHT_SUM_TOLERANCE:
+        raise HTTPException(status_code=400, detail=f"权重之和必须为 1，实收：{total}")
+    return weights
+
+
+def _parse_coefficient_overrides(raw: object) -> dict[str, float]:
+    """解析请求里的逐因素系数覆盖；字段缺失（`None`）返回空字典，不覆盖任何因素。
+
+    单份偏离是「自由覆盖」——不设审批门槛，改哪个因素、改成多少全由估价师
+    决定，本函数只管接住、转成合法类型，不做范围校验（范围提示见
+    `check_coefficient_overrides`，只提示不阻断）。未知因素名同样不在这里挡：
+    留给 `apply_coefficient_overrides` 去报错，理由见该函数 docstring——
+    键入错误理应在真正应用覆盖时被截住。
+
+    Raises:
+        HTTPException: raw 不是字典，或某项系数不是有效数字。
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise HTTPException(
+            status_code=400,
+            detail=f"coefficient_overrides 须为 {{因素名: 系数}} 字典：{raw!r}",
+        )
+    try:
+        return {str(k): float(v) for k, v in raw.items()}
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400, detail=f"coefficient_overrides 系数不是有效数字：{raw!r}"
+        ) from exc
+
+
+def _asset_condition_groups_from_form(
+    knowledge: Knowledge, descriptions: dict[str, str]
+) -> tuple[ConditionGroup, ...]:
+    """按基础表因素的分组 + 表单逐因素描述，组装资产状况三组。
+
+    组顺序区位→实物→权益（`GROUP_PREFIXES`），组内按基础表因素序（而非表单
+    `descriptions` 的字典序——那是用户填写顺序，不代表基础表行序）。因素没有
+    分组（`f.group == ""`，如实勘表未覆盖到的因素）不进任何组，避免臆造归属。
+    因素在但描述缺失时给空串而不是丢弃该因素——校验层要靠「因素在、描述空」
+    才能提示「未填写」。
+
+    Args:
+        knowledge: 该类别当前使用的基础表知识（含每因素 `group`）。
+        descriptions: 表单提交的 `{因素名: 描述}`。
+
+    Returns:
+        按组聚合的 ConditionGroup 元组，空组丢弃。
+    """
+    ordered: dict[str, list[ConditionFactor]] = {g: [] for g in GROUP_PREFIXES}
+    for f in knowledge.factors:
+        if f.group not in ordered:
+            continue
+        ordered[f.group].append(ConditionFactor(f.name, descriptions.get(f.name, "")))
+    return tuple(
+        ConditionGroup(name=g, factors=tuple(fs)) for g, fs in ordered.items() if fs
+    )
+
+
 def _project_from_payload(data: dict[str, object]) -> Project:
     """把 /api/render 收到的（可能经用户编辑的）JSON 还原为 Project。
 
     Args:
-        data: 前端提交的项目字段字典，形状与 /api/extract 返回的 project 一致。
+        data: 前端提交的项目字段字典，形状与 /api/extract 返回的 project 一致，
+            另可带 `asset_conditions`（`{因素名: 描述}`，来自表单或实勘表预填）。
 
     Returns:
-        还原后的 Project。
+        还原后的 Project。`asset_conditions` 非空时，据当前类别的基础表知识
+        （分组、因素序）组装 `asset_condition_groups`；未带该字段则保持默认空，
+        不强求已导入基础表——描述是报告增量，不该拖累既有的无描述渲染路径。
 
     Raises:
-        ValueError: 字段缺失、类型不对，或 category 不是合法枚举值。
+        ValueError: 字段缺失、类型不对，category 不是合法枚举值，或带了
+            `asset_conditions` 却尚未导入过该类别的基础表。
     """
     raw_subjects = data.get("subjects")
     if not isinstance(raw_subjects, list):
@@ -134,8 +230,24 @@ def _project_from_payload(data: dict[str, object]) -> Project:
         )
         for s in raw_subjects
     )
+    category = Category(str(data.get("category", "")))
+    raw_conditions = data.get("asset_conditions")
+    descriptions = (
+        {str(k): str(v) for k, v in raw_conditions.items()}
+        if isinstance(raw_conditions, dict)
+        else {}
+    )
+    asset_condition_groups: tuple[ConditionGroup, ...] = ()
+    if descriptions:
+        try:
+            knowledge = BaseTableStore(_base_table_dir()).load(category)
+        except FileNotFoundError as exc:
+            raise ValueError(
+                f"带资产状况描述渲染但尚未导入过 {category.value} 类基础表：{exc}"
+            ) from exc
+        asset_condition_groups = _asset_condition_groups_from_form(knowledge, descriptions)
     return Project(
-        category=Category(str(data.get("category", ""))),
+        category=category,
         report_no=str(data.get("report_no", "")),
         project_name=str(data.get("project_name", "")),
         client=str(data.get("client", "")),
@@ -158,6 +270,7 @@ def _project_from_payload(data: dict[str, object]) -> Project:
         unit_price=_to_float(data.get("unit_price")),
         dispersion=_to_float(data.get("dispersion")),
         subjects=subjects,
+        asset_condition_groups=asset_condition_groups,
     )
 
 
@@ -167,12 +280,119 @@ def _safe_filename(name: str) -> str:
     return cleaned or "估价报告"
 
 
+def _asset_conditions_to_ledger(
+    groups: tuple[ConditionGroup, ...],
+) -> tuple[dict[str, object], ...]:
+    """把 `Project.asset_condition_groups` 序列化成台账「资产状况」字段的形状。
+
+    独立可选字段，跟「经引擎重算」无关（不参与六者同生同灭）——导入 Excel 直接
+    生成的报告一样可能带手写描述。空分组序列化为空元组而非 None：这里已经
+    过手组装过（哪怕结果为空），跟「压根没有这个字段」的旧台账不是一回事。
+    """
+    return tuple(
+        {
+            "组": g.name,
+            "因素": [{"名称": f.name, "描述": f.description} for f in g.factors],
+        }
+        for g in groups
+    )
+
+
+def _validate_weights(weights: object, num_instances: int) -> None:
+    """验证台账权重的有效性。
+
+    权重必须是浮点数序列，长度与实例数一致，和为 1（容差 1e-6）。
+    缺失或为空时使用默认权重，无须验证。
+
+    Args:
+        weights: 来自 raw["weights"] 的权重值
+        num_instances: 实际实例数（uses 列表长度）
+
+    Raises:
+        ValueError: 权重数量不对、非数字，或总和偏离 1。
+    """
+    if weights is None:
+        return
+    if not isinstance(weights, list):
+        raise ValueError(f"台账权重非法：须为数字列表，实收：{weights!r}")
+    if len(weights) != num_instances:
+        raise ValueError(f"台账权重非法：需 {num_instances} 个，实收 {len(weights)} 个")
+    try:
+        weight_floats = tuple(float(w) for w in weights)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"台账权重非法：包含非数字：{weights!r}") from exc
+    total = sum(weight_floats)
+    if abs(total - 1.0) > _WEIGHT_SUM_TOLERANCE:
+        raise ValueError(f"台账权重非法：和需为 1，实收 {total}")
+
+
+def _apply_ledger_coefficient_overrides(
+    raw: dict[str, Any], knowledge: Knowledge
+) -> tuple[Knowledge, tuple[Deviation, ...]]:
+    """把台账 payload 里的逐因素系数覆盖应用到基础知识，产出「实际知识」+「偏离」。
+
+    这是台账落盘侧的坑：单份偏离必须存成「基线版本 + 差异」（`Deviation` 的
+    docstring），而不是悄悄换一个基础表版本——`基线版本`/`实际指纹` 不变，
+    差异单独记进 `偏离`。`实际知识` 才是重放要用的那份（`replay.py` 读的正是
+    `entry.基础表.实际知识`），必须是覆盖后的版本，否则重放会悄悄用回基础表
+    原系数，算出另一个数，且看不出哪里错了。
+
+    未知因素名不在本函数里挡：`apply_coefficient_overrides` 自己会报
+    `ValueError`，且**必须让它原样炸出去**——写入路径宁可让这次生成的台账
+    记不上（`/api/render` 外层广播 except 兜底：报告照常出、只是台账跳过），
+    也不能把一条覆盖了根本不存在的因素的记录悄悄写进永久台账。
+
+    Args:
+        raw: `/api/render` 收到的台账 payload，可能带 `coefficient_overrides`
+            （`{因素名: 新系数}`）、`偏离理由`（全局理由）、
+            `coefficient_override_reasons`（`{因素名: 理由}`，逐因素理由，
+            命中时优先于全局理由）。
+        knowledge: 该类别当前使用的基础 Knowledge（覆盖前）。
+
+    Returns:
+        (实际知识, 偏离)：无覆盖时原样返回 `knowledge` 与空元组。
+
+    Raises:
+        ValueError: `coefficient_overrides` 里出现 `knowledge` 中不存在的因素名。
+    """
+    raw_overrides = raw.get("coefficient_overrides")
+    if not isinstance(raw_overrides, dict) or not raw_overrides:
+        return knowledge, ()
+
+    overrides = {str(k): float(v) for k, v in raw_overrides.items()}
+    base_by_name = {f.name: f for f in knowledge.factors}
+    overridden = apply_coefficient_overrides(knowledge, overrides)  # 未知因素名在此报错
+
+    global_reason = str(raw.get("偏离理由", ""))
+    raw_reasons = raw.get("coefficient_override_reasons")
+    per_factor_reasons = (
+        {str(k): str(v) for k, v in raw_reasons.items()}
+        if isinstance(raw_reasons, dict)
+        else {}
+    )
+    偏离 = tuple(
+        Deviation(
+            因素=name,
+            字段="每差1档修正系数",
+            原值=str(base_by_name[name].coefficient),
+            现值=str(value),
+            审批单号="",  # 自由偏离：本版不设审批门槛，见类头注释
+            理由=per_factor_reasons.get(name, global_reason),
+        )
+        for name, value in overrides.items()
+    )
+    return overridden, 偏离
+
+
 def _build_ledger_entry(project: Project, raw: dict[str, Any] | None) -> LedgerEntry:
     """按一次生成攒出台账记录。
 
     `raw` 为 None（或缺关键字段）即视为**未经系统重算**——导入 Excel 直接生成的
     老路正是如此。此时基础表/档次/实例/方法/权重/结果全为 None，`经引擎重算` 为 False。
     这不是缺失，恰恰是复核最想知道的事：这份报告的数字不是引擎算的。
+
+    `资产状况` 与上述六者无关，两条路径都照样序列化——描述只进报告、不进算术，
+    没有引擎重算也可以有手写描述。
     """
     一览表 = tuple(
         {
@@ -181,11 +401,13 @@ def _build_ledger_entry(project: Project, raw: dict[str, Any] | None) -> LedgerE
         }
         for s in project.subjects
     )
+    资产状况 = _asset_conditions_to_ledger(project.asset_condition_groups)
     if not raw or not raw.get("result"):
         return LedgerEntry.new(
             报告编号=project.report_no, 类别=project.category,
             基础表=None, 估价对象档次=None, 实例=None, 方法=None, 权重=None, 结果=None,
             一览表=一览表,
+            资产状况=资产状况,
         )
 
     category = Category(str(raw.get("category", project.category.value)))
@@ -194,6 +416,10 @@ def _build_ledger_entry(project: Project, raw: dict[str, Any] | None) -> LedgerE
     knowledge = base_store.load(category, str(fingerprint_raw) if fingerprint_raw else None)
     current = base_store.current(category)
     baseline = str(fingerprint_raw) if fingerprint_raw else (current.指纹 if current else "")
+
+    # 单份偏离：覆盖为空即原样返回 knowledge 与空元组，旧 payload（没有
+    # coefficient_overrides 字段）行为不变，向后兼容。
+    knowledge, 偏离 = _apply_ledger_coefficient_overrides(raw, knowledge)
 
     levels = {str(k): str(v) for k, v in dict(raw["subject_levels"]).items()}
     inst_store = InstanceStore(_store_path())
@@ -218,26 +444,42 @@ def _build_ledger_entry(project: Project, raw: dict[str, Any] | None) -> LedgerE
         )
 
     result_raw = dict(raw["result"])
+    # 验证并构建权重
+    raw_weights = raw.get("weights")
+    _validate_weights(raw_weights, len(uses))
+    weights = (
+        tuple(float(w) for w in raw_weights)
+        if raw_weights is not None
+        else default_weights()
+    )
     return LedgerEntry.new(
         报告编号=project.report_no,
         类别=category,
         基础表=BaseTableUse(
             基线版本=baseline,
-            # 今天恒空——偏离功能未上线（用户决定：只留口子）。
-            偏离=(),
+            偏离=偏离,
+            # 有覆盖时 knowledge 已被 _apply_ledger_coefficient_overrides 换成
+            # 覆盖后的那份——重放读的正是这里，不是基础表库里的原始版本。
             实际知识=knowledge,
+            # 偏离是「基线版本 + 差异」，不是「另一个版本」：实际指纹仍等于
+            # 基线版本，差异单独记在偏离里（Deviation 的 docstring）。
             实际指纹=baseline,
         ),
         估价对象档次=levels,
         实例=tuple(uses),
         方法=MethodUse(名称=METHOD_NAME, 版本=get_method(METHOD_NAME).version),
-        权重=default_weights(),
+        # **台账要记「当时实际用的那组」，不是「今天的默认」**——否则哪天权重
+        # 开放可调，用户填了非默认权重算出报告，台账却记着 ⅓⅓⅓，重放会用错
+        # 权重、悄悄算出另一个数，还看不出错在哪。`raw.get("weights")` 缺失
+        # （老 payload，前端还没送这个字段）或为空，才退回默认——向后兼容。
+        权重=weights,
         结果=Result(
             比准价格=tuple(float(p) for p in result_raw["比准价格"]),
             评估结果=float(result_raw["评估结果"]),
             离散度=float(result_raw["离散度"]),
         ),
         一览表=一览表,
+        资产状况=资产状况,
     )
 
 
@@ -275,6 +517,7 @@ def create_app() -> FastAPI:
                     "起始日": i.起始日.isoformat() if i.起始日 else None,
                     "日期精度": i.日期精度.value,
                     "备注": i.备注,
+                    "因素档次": dict(i.因素档次),
                 }
                 for i in store.list_by_category(cat)
             ]
@@ -390,6 +633,11 @@ def create_app() -> FastAPI:
 
         不做推荐；市场状况指数须逐条现填，系统不推算、不给默认值——
         缺失时 400，不得静默取默认值继续算。
+
+        `coefficient_overrides`（`{因素名: 新系数}`）是单份报告的自由覆盖：
+        不设审批门槛，缺省不传即维持基础表原系数不变。覆盖后若某因素落在
+        基础表调整范围外，只在 `提示` 里软警告，不阻断——是否合理由估价师
+        判断。未知因素名仍是硬错误（400），键入错误不该被悄悄吞掉。
         """
         raw_selected = payload.get("selected")
         if not isinstance(raw_selected, list):
@@ -412,20 +660,43 @@ def create_app() -> FastAPI:
         except FileNotFoundError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+        weights = _parse_weights(payload.get("weights"))
+        coefficient_overrides = _parse_coefficient_overrides(
+            payload.get("coefficient_overrides")
+        )
+
         try:
             store = InstanceStore(_store_path())
             store.load()
+            # 覆盖为空即维持原样——不新建一份等价的 Knowledge，省一次分配，
+            # 也让「没传 coefficient_overrides」与旧行为字节级一致。
+            computed_knowledge = (
+                apply_coefficient_overrides(knowledge, coefficient_overrides)
+                if coefficient_overrides
+                else knowledge
+            )
             result = compute_from_selection(
                 ComparisonInput(
                     category=category,
-                    knowledge=knowledge,
+                    knowledge=computed_knowledge,
                     subject_levels={str(k): str(v) for k, v in raw_levels.items()},
                 ),
                 raw_selected,
                 store,
+                weights=weights,
             )
         except ValueError as exc:
+            # 未知因素名（apply_coefficient_overrides 报的）与选实例/档次相关的
+            # 错误走同一条 400 路径——都是「请求给的东西系统接不住」。
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        # 重算出的离散度同样要过校验——它会跟着结果进报告，而 /api/extract
+        # 那次校验查的是 Excel 里的旧值。**只提示，不阻断**：换不换实例是
+        # 估价师的判断。系数越界提示同理，且只在真有覆盖时才查——用基础表
+        # 原始 knowledge 查范围（调整范围字段覆盖前后一致，用哪份都一样）。
+        提示 = list(check_dispersion(result.离散度))
+        if coefficient_overrides:
+            提示 += check_coefficient_overrides(knowledge, coefficient_overrides)
 
         return {
             "比准价格": list(result.比准价格),
@@ -434,10 +705,7 @@ def create_app() -> FastAPI:
             # 单位随数字一起走：农用 1399.26 与办公 2.83 差 500 倍，
             # 让界面自己去配单位，早晚配错一次。
             "单价单位": price_unit(category),
-            # 重算出的离散度同样要过校验——它会跟着结果进报告，而 /api/extract
-            # 那次校验查的是 Excel 里的旧值。**只提示，不阻断**：换不换实例是
-            # 估价师的判断。
-            "提示": [asdict(w) for w in check_dispersion(result.离散度)],
+            "提示": [asdict(w) for w in 提示],
         }
 
     @app.post("/api/annual-values")
@@ -563,6 +831,9 @@ def create_app() -> FastAPI:
             warnings = validate(project, path)
             source = from_excel(path)
             imported = BaseTableStore(_base_table_dir()).import_from_excel(path)
+            # 实勘表逐因素手写描述，读一次收进预填 payload——文件在 finally 里
+            # 就会被删，须在此处（workdir 还在）取完。
+            conditions = read_survey_conditions(path)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         finally:
@@ -578,6 +849,10 @@ def create_app() -> FastAPI:
             # 之后 /api/compute 用的就是表单里的这份，不再回头读 Excel。
             "subject_levels": source.subject_levels,
             "base_table": _version_payload(imported.版本),
+            # 资产状况逐因素描述（{因素名: 描述}），供表单预填每因素描述框。
+            # 与 subject_levels 同级——不进 Project 数据类，表单收口后随
+            # project.asset_conditions 一并提交，由 _project_from_payload 组装。
+            "asset_conditions": {c.factor: c.description for c in conditions},
             # 界面据此给一览表的表头标单位，不在 JS 里另写一份农用/房屋的判断。
             "单价单位": price_unit(project.category),
             "面积单位": area_unit(project.category),
@@ -604,7 +879,13 @@ def create_app() -> FastAPI:
             "factors": [
                 {
                     "名称": f.name,
+                    # 资产状况分组（区位状况/实物状况/权益状况），来自实勘表导入。
+                    # 表单据此把 28 个因素按组分节展示，不在 JS 里另编一份分组规则。
+                    "分组": f.group,
                     "系数": f.coefficient,
+                    # 调整范围（J 列，如 "2-4"）：单份偏离表单据此给系数输入框一个
+                    # 只读软边界提示，越界不阻断（check_coefficient_overrides 同理）。
+                    "调整范围": f.调整范围,
                     # 档次按分值从高到低给：基础表里 D..H 就是 2/1/0/-1/-2 的排法，
                     # 下拉框顺序跟着它，估价师看到的次序与 Excel 里一致。
                     "档次": [

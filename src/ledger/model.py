@@ -68,8 +68,9 @@ def current_operator() -> str:
 class Deviation:
     """单份报告对基础表的一处偏离。
 
-    **今天恒空**——偏离功能未上线（用户决定：只留口子）。形状先定下来，将来加时
-    老记录的空数组语义天然正确，不必重写历史台账。
+    现由单份系数覆盖产出（自由覆写模式：估价师改肆步的因素系数不设审批门槛，
+    改动随生成的报告一并记入台账）。`审批单号` 留空——自由覆写模式没有审批流程
+    可挂，该字段是为将来若要收紧口子预留的位置，不代表现在会被填。
 
     偏离必须存成「基线版本 + 差异」，不能存成「另一个版本」：否则一年下来库里躺着
     两百个指纹，分不出哪些是公司知识演进、哪些是某个项目破了个例。
@@ -136,6 +137,12 @@ class LedgerEntry:
     权重: tuple[float, ...] | None
     结果: Result | None
     一览表: tuple[dict[str, object], ...] = field(default_factory=tuple)
+    # 逐因素资产状况描述，形如 ({"组": "区位状况", "因素": [{"名称":.., "描述":..}, ...]}, ...)。
+    # 独立可选字段，**不参与**「基础表/估价对象档次/实例/方法/权重/结果」六者同生同灭：
+    # 描述只进报告、不进算术（约束见 src/model.py 的 ConditionFactor），跟「经引擎重算」
+    # 是不是 True 没关系——导入 Excel 直接生成的报告也可能带手写描述。默认 None 表示
+    # 「压根没有这个字段」（旧台账），空元组表示「有这个字段但没填任何组」。
+    资产状况: tuple[dict[str, object], ...] | None = None
 
     @property
     def 经引擎重算(self) -> bool:
@@ -156,12 +163,16 @@ class LedgerEntry:
         权重: tuple[float, ...] | None,
         结果: Result | None,
         一览表: tuple[dict[str, object], ...],
+        资产状况: tuple[dict[str, object], ...] | None = None,
         now: datetime | None = None,
         经手人: str | None = None,
     ) -> "LedgerEntry":
         """造一条记录。
 
         Args:
+            资产状况: 逐因素资产状况描述，独立可选，**不参与**下面六者同生同灭的
+                校验——它跟「经引擎重算」无关，导入 Excel 直接生成的报告一样
+                可以带手写描述。缺省 None。
             now: 生成时间；缺省取当前时刻。显式开口子是为了让测试固定时间。
             经手人: 缺省自动取 `登录名@机器名`。
 
@@ -173,7 +184,7 @@ class LedgerEntry:
                 `结果 is not None` 判断，那样的记录会自称「经引擎重算」，
                 却缺着重算所需的东西，它在说谎。这条校验只在写入路径
                 （本方法）上把关；`from_dict()` 读取台账文件时刻意不查，
-                理由见该函数 docstring。
+                理由见该函数 docstring。`资产状况` 不在这六者之列，不受此校验约束。
         """
         字段 = {
             "基础表": 基础表,
@@ -204,6 +215,7 @@ class LedgerEntry:
             权重=权重,
             结果=结果,
             一览表=一览表,
+            资产状况=资产状况,
         )
 
 
@@ -291,6 +303,7 @@ def to_dict(entry: LedgerEntry) -> dict[str, object]:
             "离散度": entry.结果.离散度,
         } if entry.结果 is not None else None,
         "一览表": [dict(s) for s in entry.一览表],
+        "资产状况": [dict(g) for g in entry.资产状况] if entry.资产状况 is not None else None,
     }
 
 
@@ -316,6 +329,9 @@ def from_dict(data: dict[str, object]) -> LedgerEntry:
     档次 = data.get("估价对象档次")
     权重 = data.get("权重")
     基础表 = data.get("基础表")
+    # .get() 而非 data["资产状况"]：旧台账文件压根没有这个键（这个字段是后加的），
+    # 缺键与显式存 null 都要还原成 None，二者语义一样——都是「压根没有」。
+    资产状况 = data.get("资产状况")
     # 判断一律用 is not None，与 to_dict 对称：空 {} / 空 [] 也是「存在但为空」，
     # 不是「没有这个字段」。一边认空一边不认，存与读就不是一回事，往返即废。
     return LedgerEntry(
@@ -338,4 +354,5 @@ def from_dict(data: dict[str, object]) -> LedgerEntry:
             离散度=float(dict(结果)["离散度"]),  # type: ignore[arg-type,call-overload]
         ) if 结果 is not None else None,
         一览表=tuple(dict(s) for s in data.get("一览表", [])),  # type: ignore[attr-defined]
+        资产状况=tuple(dict(g) for g in 资产状况) if 资产状况 is not None else None,  # type: ignore[attr-defined]
     )

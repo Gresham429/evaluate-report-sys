@@ -14,15 +14,19 @@ import pytest
 
 from src.engine.compute import METHOD_NAME, compute, compute_from_selection, default_weights
 from src.engine.inputs import from_excel
-from src.engine.knowledge import Knowledge
+from src.engine.knowledge import Knowledge, apply_coefficient_overrides
 from src.engine.methods import get_method
 from src.engine.methods.base import ComparisonMethod, Instance, Result
 from src.knowledge_base.fingerprint import fingerprint
+from src.knowledge_base.store import BaseTableStore
 from src.ledger.model import BaseTableUse, InstanceUse, LedgerEntry, MethodUse
+from src.ledger.model import from_dict as ledger_from_dict
+from src.ledger.model import to_dict as ledger_to_dict
 from src.ledger.replay import replay
 from src.library.importer import import_from_excel
 from src.library.store import InstanceStore
-from src.model import Category
+from src.model import Category, Project
+from src.web.app import _build_ledger_entry
 from tests.conftest import CASES
 
 OFFICE_MARKET_INDEX = {
@@ -107,6 +111,250 @@ def test_replay_uses_the_recorded_weights(tmp_path: Path) -> None:
     skewed = replace(entry, 权重=(1.0, 0.0, 0.0))
     assert replay(skewed).评估结果 != OFFICE_GOLDEN
     assert replay(skewed).评估结果 == pytest.approx(2.92, abs=0.011), "该等于实例A 的比准价格"
+
+
+def _minimal_project(report_no: str, category: Category) -> Project:
+    """搭一个满足 `Project` 全部必填字段的最小项目。
+
+    本测试只关心 `_build_ledger_entry` 怎么处理权重，其余字段内容不影响权重
+    逻辑，占位即可——但 `Project` 是 frozen dataclass、字段全部必填，仍须凑齐。
+    """
+    return Project(
+        category=category,
+        report_no=report_no,
+        project_name="测试项目",
+        client="测试委托方",
+        client_address="测试地址",
+        legal_rep="张三",
+        purpose="评估房地产租赁价值",
+        survey_date="2026-03-26",
+        value_date="2026-03-26",
+        materials="《不动产权证》",
+        certificate_status="估价对象已取得《不动产权证》",
+        owner="测试权利人",
+        address="测试坐落",
+        usage="办公",
+        scale="占位",
+        scope="占位",
+        current_status="占位",
+        work_period="占位",
+        issue_date="2026-06-05",
+        surveyor="测试人员",
+        unit_price=0.0,
+        dispersion=0.0,
+        subjects=(),
+    )
+
+
+def test_ledger_entry_stores_the_weights_actually_used_not_todays_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**台账记录侧的坑**：`_build_ledger_entry` 必须记「当时实际用的那组权重」，
+    不是它自己调 `default_weights()` 拿到的今天默认 ⅓⅓⅓。
+
+    三步缺一不可：
+    1. 前提——(0.5, 0.3, 0.2) 与默认 ⅓⅓⅓ 必须算出不同的评估结果，否则测试测
+       不出区别（拿一样的数蒙混过关）。
+    2. 修复本身——`_build_ledger_entry(project, raw)` 记进 `entry.权重` 的必须
+       是 raw 里的 (0.5, 0.3, 0.2)，不是 `default_weights()`。这条在修复前
+       （`_build_ledger_entry` 硬编码 `权重=default_weights()`）必然失败。
+    3. 修复闭环——把这条记录落盘往返（`to_dict` → `from_dict`）后 `replay()`，
+       重算结果须与非默认权重那次一致：证明 `replay()` 用的是台账里存的权重，
+       不是随手拿到的今天默认（`replay.py` 早已正确读取 `entry.权重`，这一步
+       验证的是「存对了」，不是「读对了」）。
+    """
+    store_path = tmp_path / "库.json"
+    store = InstanceStore(store_path)
+    for inst in import_from_excel(CASES["办公"]):
+        store.add(inst)
+    store.save()
+    monkeypatch.setenv("实例库路径", str(store_path))
+    base_dir = tmp_path / "基础表"
+    monkeypatch.setenv("基础表目录", str(base_dir))
+    BaseTableStore(base_dir).import_from_excel(CASES["办公"])
+
+    source = from_excel(CASES["办公"])
+    selected = [
+        {"编号": i.编号, "市场状况指数": OFFICE_MARKET_INDEX[i.位置], "备注": ""}
+        for i in store.list_by_category(Category.OFFICE)
+    ]
+
+    skewed_weights = (0.5, 0.3, 0.2)
+    default_result = compute_from_selection(source, selected, store)
+    skewed_result = compute_from_selection(source, selected, store, weights=skewed_weights)
+    assert skewed_result.评估结果 != default_result.评估结果, (
+        "前提不成立：(0.5,0.3,0.2) 与默认 ⅓⅓⅓ 须算出不同的评估结果，否则测试测不出区别"
+    )
+
+    project = _minimal_project("正恒评报字[2026]第F071号", Category.OFFICE)
+    raw: dict[str, object] = {
+        "category": "办公",
+        "base_table": None,
+        "subject_levels": source.subject_levels,
+        "selected": selected,
+        "weights": list(skewed_weights),
+        "result": {
+            "比准价格": list(skewed_result.比准价格),
+            "评估结果": skewed_result.评估结果,
+            "离散度": skewed_result.离散度,
+        },
+    }
+
+    entry = _build_ledger_entry(project, raw)
+    assert entry.权重 == skewed_weights, "台账记的不是实际用的权重，而是今天的默认——坑没堵上"
+    assert entry.权重 != default_weights()
+
+    round_tripped = ledger_from_dict(ledger_to_dict(entry))
+    assert round_tripped.权重 == skewed_weights
+
+    replayed = replay(round_tripped)
+    assert replayed.评估结果 == skewed_result.评估结果
+    assert replayed.评估结果 != default_result.评估结果
+
+
+# 办公基础表里「重要场所距离」原系数 1.0、调整范围 2-4。改到 3.0（范围内）足以
+# 让评估结果与基础表原值算出的结果不同——是本模块坑测试与软提示测试的公共前提。
+OFFICE_OVERRIDE_FACTOR = "重要场所距离"
+OFFICE_OVERRIDE_COEFF = 3.0
+
+
+def test_ledger_entry_stores_the_overridden_coefficient_not_the_base_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**台账记录侧的坑（单份偏离版）**：`_build_ledger_entry` 必须把估价师逐份调过的
+    系数存进 `实际知识`，不是基础表原始系数——否则 `replay()` 会悄悄用回基础表
+    系数，算出另一个数，且看不出错在哪（与可调权重的坑同一类，见 223d4ac）。
+
+    四步缺一不可：
+    1. 前提——覆盖后的系数须与基础表原系数算出不同的评估结果，否则测试测不出
+       区别（拿一样的数蒙混过关）。
+    2. 修复本身——`entry.基础表.实际知识` 里 `重要场所距离` 的系数必须是覆盖后
+       的 3.0，不是基础表原始的 1.0。
+    3. `偏离` 必须记下这处差异（因素/字段/原值/现值），且 `审批单号` 为空——
+       自由覆盖模式不设审批门槛。
+    4. 修复闭环——落盘往返（`to_dict`→`from_dict`）后 `replay()`，重算结果须
+       与覆盖后那次一致：证明 `replay()` 用的是台账里存的覆盖后知识，不是
+       基础表库里的原始版本（`replay.py` 早已正确读取 `entry.基础表.实际知识`，
+       这一步验证的是「存对了」，不是「读对了」）。
+    """
+    store_path = tmp_path / "库.json"
+    store = InstanceStore(store_path)
+    for inst in import_from_excel(CASES["办公"]):
+        store.add(inst)
+    store.save()
+    monkeypatch.setenv("实例库路径", str(store_path))
+    base_dir = tmp_path / "基础表"
+    monkeypatch.setenv("基础表目录", str(base_dir))
+    BaseTableStore(base_dir).import_from_excel(CASES["办公"])
+
+    source = from_excel(CASES["办公"])
+    selected = [
+        {"编号": i.编号, "市场状况指数": OFFICE_MARKET_INDEX[i.位置], "备注": ""}
+        for i in store.list_by_category(Category.OFFICE)
+    ]
+
+    base_coefficient = next(
+        f.coefficient for f in source.knowledge.factors if f.name == OFFICE_OVERRIDE_FACTOR
+    )
+    assert base_coefficient != OFFICE_OVERRIDE_COEFF, "前提不成立：覆盖值须与基础表原值不同"
+
+    default_result = compute_from_selection(source, selected, store)
+    overridden_knowledge = apply_coefficient_overrides(
+        source.knowledge, {OFFICE_OVERRIDE_FACTOR: OFFICE_OVERRIDE_COEFF}
+    )
+    from dataclasses import replace
+
+    overridden_source = replace(source, knowledge=overridden_knowledge)
+    overridden_result = compute_from_selection(overridden_source, selected, store)
+    assert overridden_result.评估结果 != default_result.评估结果, (
+        "前提不成立：覆盖系数须算出与基础表不同的评估结果，否则测试测不出区别"
+    )
+
+    project = _minimal_project("正恒评报字[2026]第F071号", Category.OFFICE)
+    raw: dict[str, object] = {
+        "category": "办公",
+        "base_table": None,
+        "subject_levels": source.subject_levels,
+        "selected": selected,
+        "coefficient_overrides": {OFFICE_OVERRIDE_FACTOR: OFFICE_OVERRIDE_COEFF},
+        "偏离理由": "实地勘察后估价师判断该项目与基础表默认档次不符",
+        "result": {
+            "比准价格": list(overridden_result.比准价格),
+            "评估结果": overridden_result.评估结果,
+            "离散度": overridden_result.离散度,
+        },
+    }
+
+    entry = _build_ledger_entry(project, raw)
+    assert entry.基础表 is not None
+    stored_factor = next(
+        f for f in entry.基础表.实际知识.factors if f.name == OFFICE_OVERRIDE_FACTOR
+    )
+    assert stored_factor.coefficient == OFFICE_OVERRIDE_COEFF, (
+        "台账记的不是覆盖后的系数，而是基础表原系数——坑没堵上"
+    )
+
+    assert len(entry.基础表.偏离) == 1
+    deviation = entry.基础表.偏离[0]
+    assert deviation.因素 == OFFICE_OVERRIDE_FACTOR
+    assert deviation.字段 == "每差1档修正系数"
+    assert deviation.原值 == str(base_coefficient)
+    assert deviation.现值 == str(OFFICE_OVERRIDE_COEFF)
+    assert deviation.审批单号 == "", "自由偏离模式不设审批门槛，审批单号须为空"
+    assert deviation.理由 == "实地勘察后估价师判断该项目与基础表默认档次不符"
+
+    # 基线版本/实际指纹不因偏离而变——偏离是「基线版本 + 差异」，不是新版本。
+    assert entry.基础表.基线版本 == entry.基础表.实际指纹
+
+    round_tripped = ledger_from_dict(ledger_to_dict(entry))
+    assert round_tripped.基础表 is not None
+    round_tripped_factor = next(
+        f for f in round_tripped.基础表.实际知识.factors if f.name == OFFICE_OVERRIDE_FACTOR
+    )
+    assert round_tripped_factor.coefficient == OFFICE_OVERRIDE_COEFF
+
+    replayed = replay(round_tripped)
+    assert replayed.评估结果 == overridden_result.评估结果
+    assert replayed.评估结果 != default_result.评估结果
+
+
+def test_ledger_entry_without_overrides_keeps_deviation_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """没传 coefficient_overrides——`偏离` 须为空、`实际知识` 须是基础表原样。
+
+    向后兼容检查：老 payload（前端还没送 coefficient_overrides 字段）不该被
+    本次改动波及。
+    """
+    entry, _ = _live_entry(tmp_path)
+    assert entry.基础表 is not None
+    assert entry.基础表.偏离 == ()
+
+
+def test_ledger_entry_rejects_unknown_coefficient_override_factor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """覆盖里出现基础表没有的因素名——台账不能悄悄把这条记录写下去。
+
+    `apply_coefficient_overrides` 已会为未知因素名报 `ValueError`
+    （`src/engine/knowledge.py`），`_build_ledger_entry` 必须原样放行、不吞掉它：
+    写入路径宁可炸也不能把一条覆盖了不存在因素的记录写进永久台账。
+    `/api/render` 外层有广播 except 兜底（报告照常出、只是台账跳过），
+    但这条防线得先在这里立住。
+    """
+    base_dir = tmp_path / "基础表"
+    monkeypatch.setenv("基础表目录", str(base_dir))
+    BaseTableStore(base_dir).import_from_excel(CASES["办公"])
+
+    project = _minimal_project("正恒评报字[2026]第F071号", Category.OFFICE)
+    raw: dict[str, object] = {
+        "category": "办公",
+        "base_table": None,
+        "coefficient_overrides": {"这个因素不存在": 3.0},
+        "result": {"比准价格": [1.0], "评估结果": 1.0, "离散度": 0.0},
+    }
+    with pytest.raises(ValueError, match="未知因素名"):
+        _build_ledger_entry(project, raw)
 
 
 def test_replay_refuses_a_report_that_was_never_computed(tmp_path: Path) -> None:

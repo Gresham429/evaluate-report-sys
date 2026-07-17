@@ -163,9 +163,43 @@ def test_both_entry_points_agree(tmp_path) -> None:  # type: ignore[no-untyped-d
 
 
 def test_default_weights_are_thirds() -> None:
-    """权重写死各 ⅓（用户决定）。台账要存它——哪天开放可调，重放必须用当时那组。"""
+    """权重默认各 ⅓；现已开放可调，`compute_from_selection` 显式传 weights 可覆盖。"""
     from src.engine.compute import default_weights
 
     weights = default_weights()
     assert len(weights) == 3
     assert sum(weights) == pytest.approx(1.0, abs=0.001)
+
+
+def test_compute_from_selection_with_explicit_weights_differs_from_default(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """显式传非默认权重，结果须与默认 ⅓⅓⅓ 不同——证明权重真的传进了引擎，不是摆设。"""
+    store = _office_store(tmp_path)
+    source = from_excel(CASES["办公"])
+    selections = _office_selections(store)
+
+    default_result = compute_from_selection(source, selections, store)
+    skewed_result = compute_from_selection(source, selections, store, weights=(0.5, 0.3, 0.2))
+
+    assert skewed_result != default_result
+    assert skewed_result.评估结果 != default_result.评估结果
+
+
+def test_compute_from_selection_weights_none_matches_old_behavior(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """`weights=None` 与不传该参数（旧调用方式）必须算出完全相同的结果——向后兼容，默认路径字节级不变。"""
+    store = _office_store(tmp_path)
+    source = from_excel(CASES["办公"])
+    selections = _office_selections(store)
+
+    explicit_none = compute_from_selection(source, selections, store, weights=None)
+    old_call = compute_from_selection(source, selections, store)
+    assert explicit_none == old_call
+    assert explicit_none.评估结果 == OFFICE_GOLDEN
+
+
+def test_compute_from_selection_rejects_mismatched_weight_count(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """权重数量与选中实例数量不一致须报错，不得静默截断或补零。"""
+    store = _office_store(tmp_path)
+    source = from_excel(CASES["办公"])
+    selections = _office_selections(store)
+    with pytest.raises(ValueError, match="权重数量"):
+        compute_from_selection(source, selections, store, weights=(0.5, 0.5))
