@@ -4,11 +4,12 @@
 > 「这是什么、代码在哪、怎么跑、什么绝不能碰、还有什么没做」。
 > 细节在各专题文档里，本页只给指路。
 
-- 更新：2026-07-17
-- 分支：`main`（干净，487 项测试全绿）——第五轮 + 反馈、**第六轮**（4 新类别 + 委托评估协议书 +
-  下载点选，`feat/new-categories-dual-report`）均**已合并**。
+- 更新：2026-07-18
+- 分支：`main`（干净，**497 项测试全绿**）——第五轮 + 反馈、**第六轮**（4 新类别 + 委托评估协议书 +
+  下载点选）、**钉钉同步前 3 刀**（Ledger/BaseTable/Instance 三个 Store 可插拔后端）均**已合并**。
   ⚠️ **交付前（打 tag `v*`）须补做**：真机点一遍第五轮/反馈 + **第六轮** UI（收费输入/两份下载/新类别下拉）
   + 跑 `/code-review ultra`；**第六轮新四类须待对方真实案例重锁算术金样 + 执业估价师终审**（见 §7）。
+- **进行中：钉钉全公司同步**（承载层=宜搭）——本地地基铺齐，**卡在付费组织凭据**，见 §1b。
 - 远端：`git@github.com:Gresham429/evaluate-report-sys.git`（私有）
 
 ## 0. 一句话
@@ -34,6 +35,7 @@
 | 打磨 | 交付 exe（GitHub Actions）、台账分组、草稿/表单折叠、若干实测 bug | §6 + v1.0.2 |
 | **五** | **估价对象资产状况**：逐因素手写描述贯通表单→报告三张表→台账 | [design](superpowers/specs/2026-07-16-估价对象资产状况-design.md) / [plan](superpowers/plans/2026-07-16-估价对象资产状况.md) |
 | **反馈** | **权重可调**（和=1、分数输入）、**单份偏离**（系数按报告可调）、**实例数据可视化** | §6 末 + `.superpowers/sdd/overnight-followups.md` |
+| **六** | **4 新类别**（住宅/工业/停车场用地/建设用地）+ **委托评估协议书** + 出报告页**下载点选** | [design](superpowers/specs/2026-07-17-新类别与双报告-design.md) / [plan](superpowers/plans/2026-07-17-新类别与双报告.md) |
 
 **端到端已验证**（真浏览器 + Windows exe 冒烟，**限前四轮**）：导入基础表 → 出报告 → 选实例重算 →
 应用 → 生成 docx → 台账「照此重算」复现出同一个数。三类金样精确复现。
@@ -41,6 +43,30 @@
 > ⚠️ **第五轮 + 反馈的 UI 尚未真机点过**（合并时是静态+API+Playwright 部分核验）。已在 main，但
 > **交付前（打 tag `v*`）必须真人点一遍**——§5 的 UI 坑单元测试拦不住。逐因素描述 / 系数框+范围软提示 /
 > 权重框（分数、和≠1 挡生成）/ 选实例展开看实例档次，都要点到。
+
+## 1b. 进行中：钉钉全公司同步（承载层=宜搭，卡付费组织）
+
+方向：把知识（基础表/实例/模板）、台账、成品报告都汇到公司钉钉，报告编号全公司统一；钉钉为权威、
+本地拉取缓存、改动回写。断网仍能读缓存、出草稿；**出正式报告需联网领号**。设计与决策见
+[钉钉同步 design](superpowers/specs/2026-07-17-钉钉全公司同步-design.md)、[宜搭数据模型 design](superpowers/specs/2026-07-17-宜搭数据模型与权限.md)。
+
+**已做（本地地基，均已并 main）**——4 个 Store 里 3 个抽出「可插拔后端」（协议 + 本地后端**行为字节不变** +
+内存后端**当宜搭适配器的可执行契约** + 契约测试）：
+
+| Store | 后端模块 | 缝口 |
+|---|---|---|
+| 台账 LedgerStore | `src/ledger/backend.py` | append 一条 / 读全部（append-only） |
+| 基础表 BaseTableStore | `src/knowledge_base/backend.py` | 版本内容不可变 + 台账只追加 |
+| 实例库 InstanceStore | `src/library/backend.py` | 整库 load / save |
+
+DraftStore **不做**（草稿是个人临时件、不上云）。
+
+**卡点（2026-07-18 实测）**：`tools/yida_smoke.py` 实跑——取 token 成功（鉴权/接法都对），但调数据接口报
+**「宜搭免费版不支持 openApi」**。**宜搭 OpenAPI 只有专业版（5988/年起）及以上才有**。测试用的组织是免费的，
+公司付费的是**另一个组织**，其凭据用户暂拿不到 → 卡在这。
+
+**凭据一到怎么接**：填 `.env`（见 [宜搭对接配置](宜搭对接配置.md)）→ 跑 `tools/yida_smoke.py` 把接口调通 →
+照三个内存后端契约写宜搭适配器（YidaLedger/BaseTable/Instance Backend）→ 挂上去 → 做登录鉴权/按人裁剪缓存/领号。
 
 ## 2. 铁律：改任何东西之前必须知道，碰了就是回归
 
@@ -64,6 +90,8 @@
    重算结果预填单价但可改（取整是估价师的判断）。
 9. **数据全程留本机**：不联外网。冻结路径见 `src/paths.py`——用户数据挂 exe 旁边，不是
    `Path(__file__)`（onefile 解压目录退出即删）。
+   **钉钉方向将改写此条**（见 §1b）：改成「数据留在**公司受控的钉钉** + 本地缓存」——企业自有、非第三方外泄，
+   属合规决策。运行时零 AI(#3)、台账只增不改(#4)、快照自洽(#5)、旧版不覆盖(#8) 全保留、还帮上同步的忙。
 
 ## 3. 代码地图
 
@@ -81,11 +109,16 @@ src/
 │   ├── adapter.py      读估价对象档次、实例
 │   └── methods/        市场比较法-2026（策略 + YAML 声明）
 ├── knowledge_base/     基础表版本库：指纹当版本号，旧版永不覆盖
+│   ├── store.py        版本管理（指纹校验/旧版不覆盖/缺失补回）
+│   └── backend.py      ★钉钉★ 可插拔后端：版本不可变 + 台账只追加（本地/内存，宜搭适配器待接）
 ├── library/            实例库：存、列、批量导入
-├── drafts/             草稿：边填边存、一条一文件、原子写
+│   ├── store.py        内存态 + 去重 + 按类别列
+│   └── backend.py      ★钉钉★ 可插拔后端：整库 load/save（本地/内存，宜搭适配器待接）
+├── drafts/             草稿：边填边存、一条一文件、原子写（★钉钉★ 不上云，无后端抽象）
 ├── ledger/             ★第四轮★ 报告生成台账
 │   ├── model.py        LedgerEntry 快照（基础表知识/实例/方法/权重/结果 + ★五★资产状况 + 偏离整份存）
-│   ├── store.py        只增不改
+│   ├── store.py        只增不改；持久化委托后端
+│   ├── backend.py      ★钉钉★ 可插拔后端：append 一条/读全部（本地/内存，宜搭适配器待接）
 │   └── replay.py       照台账重算（不碰库；用 entry.实际知识 + 权重，故权重/系数偏离自动复现）
 ├── validator/          校验：只提示不阻断（含 ★五★ 资产状况描述留空提示）
 ├── prose/              文案库 copy.yaml + 组句 + 大写金额
@@ -105,9 +138,15 @@ src/
 ```bash
 uv sync
 uv run python -m src          # 起本地服务，自动开浏览器 http://127.0.0.1:8765
-uv run pytest                 # 440 项
+uv run pytest                 # 497 项
 uv run mypy src/              # 干净
 uv run ruff check .           # 干净
+```
+
+**钉钉/宜搭对接冒烟**（需付费组织凭据，见 [宜搭对接配置](宜搭对接配置.md)）：
+```bash
+# 把 5 个值填进仓库根 .env（已 gitignore），然后：
+uv run python tools/yida_smoke.py   # 取 token → 拉表结构 → 写一行 → 读回
 ```
 
 **改代码的规矩**（[coding-style](file:///Users/gresham/.claude/rules/coding-style.md)）：TDD、中文注释讲「为什么」、
@@ -209,6 +248,10 @@ PyInstaller 不支持交叉编译，只有 windows runner 能出 .exe。见根 R
 - **决策为什么**：[`decisions/`](decisions/)（ADR-001 算术移入 Python）
 - **各轮设计**：[`superpowers/specs/`](superpowers/specs/)
 - **各轮实施计划 + 进度**：[`superpowers/plans/`](superpowers/plans/)
+- **钉钉全公司同步**：[总设计](superpowers/specs/2026-07-17-钉钉全公司同步-design.md) /
+  [宜搭数据模型与权限](superpowers/specs/2026-07-17-宜搭数据模型与权限.md) /
+  [台账可插拔后端 plan](superpowers/plans/2026-07-17-钉钉同步-01-台账可插拔后端.md)
+- **宜搭对接怎么配**（凭据从哪拿、填哪、怎么跑）：[`宜搭对接配置.md`](宜搭对接配置.md) + [建台账表清单](宜搭建表清单-台账.md)
 - **过程账本**（逐任务评审逮到什么、怎么修）：`.superpowers/sdd/progress.md`
 - **第五轮反馈的逐条决策**（① 因素集全渲染 / #1 权重 / #2 系数偏离=A 自由改 / ④ 编号阻塞钉钉 / ⑤ 实例档次）：
   `.superpowers/sdd/overnight-followups.md`
