@@ -29,7 +29,12 @@ from src.attachments.collector import AttachmentPage, collect
 from src.drafts.model import Draft
 from src.drafts.store import DEFAULT_DRAFT_DIR, DraftStore
 from src.engine.annual import annual_value
-from src.engine.compute import METHOD_NAME, compute_from_selection, default_weights
+from src.engine.compute import (
+    METHOD_NAME,
+    SELECTION_SIZE,
+    compute_from_selection,
+    default_weights,
+)
 from src.engine.inputs import ComparisonInput, from_excel
 from src.engine.knowledge import Knowledge
 from src.engine.methods import get_method
@@ -107,6 +112,36 @@ def _to_float(value: object) -> float:
     if isinstance(value, int | float | str):
         return float(value)
     raise ValueError(f"数值字段类型不对：{value!r}")
+
+
+_WEIGHT_SUM_TOLERANCE = 1e-6
+
+
+def _parse_weights(raw: object) -> tuple[float, ...] | None:
+    """解析请求里的权重列表；字段缺失（`None`）返回 `None`，交调用方取默认权重。
+
+    可调权重上线后的唯一入口：**和必须为 1**，数量须与选中实例数一致
+    （今天恒为 `SELECTION_SIZE`）。不合法一律 400，不静默夹紧或归一化——
+    权重是估价师的专业判断，系统不替他改。
+
+    Raises:
+        HTTPException: 数量不对、某项不是数字，或总和偏离 1 超过容差。
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, list) or len(raw) != SELECTION_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"权重须为 {SELECTION_SIZE} 个数字，实收：{raw!r}",
+        )
+    try:
+        weights = tuple(float(w) for w in raw)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f"权重不是有效数字：{raw!r}") from exc
+    total = sum(weights)
+    if abs(total - 1.0) > _WEIGHT_SUM_TOLERANCE:
+        raise HTTPException(status_code=400, detail=f"权重之和必须为 1，实收：{total}")
+    return weights
 
 
 def _asset_condition_groups_from_form(
@@ -305,7 +340,11 @@ def _build_ledger_entry(project: Project, raw: dict[str, Any] | None) -> LedgerE
         估价对象档次=levels,
         实例=tuple(uses),
         方法=MethodUse(名称=METHOD_NAME, 版本=get_method(METHOD_NAME).version),
-        权重=default_weights(),
+        # **台账要记「当时实际用的那组」，不是「今天的默认」**——否则哪天权重
+        # 开放可调，用户填了非默认权重算出报告，台账却记着 ⅓⅓⅓，重放会用错
+        # 权重、悄悄算出另一个数，还看不出错在哪。`raw.get("weights")` 缺失
+        # （老 payload，前端还没送这个字段）或为空，才退回默认——向后兼容。
+        权重=tuple(float(w) for w in raw["weights"]) if raw.get("weights") else default_weights(),
         结果=Result(
             比准价格=tuple(float(p) for p in result_raw["比准价格"]),
             评估结果=float(result_raw["评估结果"]),
@@ -487,6 +526,8 @@ def create_app() -> FastAPI:
         except FileNotFoundError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+        weights = _parse_weights(payload.get("weights"))
+
         try:
             store = InstanceStore(_store_path())
             store.load()
@@ -498,6 +539,7 @@ def create_app() -> FastAPI:
                 ),
                 raw_selected,
                 store,
+                weights=weights,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

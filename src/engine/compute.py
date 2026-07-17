@@ -149,6 +149,7 @@ def compute_from_selection(
     source: ComparisonInput,
     selections: Sequence[Mapping[str, object]],
     store: InstanceStore,
+    weights: Sequence[float] | None = None,
 ) -> Result:
     """从库里取出选中的实例，接入市场比较法引擎重算。
 
@@ -158,6 +159,10 @@ def compute_from_selection(
         selections: 选中项，形如
             `[{"编号": str, "市场状况指数": number, "备注": str}, ...]`，须恰好 3 条。
         store: 已加载（`load()` 过）的实例库。
+        weights: 各实例权重，长度须与 `selections` 一致。缺省 `None` 时取
+            `default_weights()`（本方法规格里的默认 ⅓ ⅓ ⅓）——**保持这条路径
+            与旧行为字节级一致**，是台账新旧记录（权重字段为 None）能继续
+            重放出金样的前提。
 
     Returns:
         Result（比准价格、评估结果、离散度）。**单位随 `source.category` 走**——
@@ -165,8 +170,8 @@ def compute_from_selection(
         标单位时须取输入里的类别，不要另猜。
 
     Raises:
-        ValueError: 选中数量不为 3、某项缺编号、编号不在库中、类别不符，
-                    或市场状况指数缺失/不合法。
+        ValueError: 选中数量不为 3、某项缺编号、编号不在库中、类别不符、
+                    市场状况指数缺失/不合法，或 `weights` 长度与选中数量不匹配。
     """
     if len(selections) != SELECTION_SIZE:
         raise ValueError(f"须选满 {SELECTION_SIZE} 条实例，实选 {len(selections)} 条")
@@ -174,4 +179,10 @@ def compute_from_selection(
     category = source.category
     instances = tuple(_resolve_instance(item, category, store) for item in selections)
 
-    return compute(source, instances, default_weights())
+    if weights is None:
+        return compute(source, instances, default_weights())
+
+    if len(weights) != len(selections):
+        raise ValueError(f"权重数量 {len(weights)} 与选中实例数量 {len(selections)} 不匹配")
+
+    return compute(source, instances, weights)

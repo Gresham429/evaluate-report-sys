@@ -154,6 +154,75 @@ def test_wrong_selection_count_rejected(client: TestClient) -> None:
     assert response.status_code == 400
 
 
+def test_compute_with_valid_custom_weights_returns_200_and_differs_from_default(
+    client: TestClient,
+) -> None:
+    """3 个数字、和为 1 的自定义权重须放行，且算出的结果须与默认 ⅓⅓⅓ 不同。"""
+    ids = _office_ids(client)
+    selected = [
+        {"编号": ids[loc], "市场状况指数": OFFICE_MARKET_INDEX[loc], "备注": ""}
+        for loc in OFFICE_ORDER
+    ]
+    response = client.post(
+        "/api/compute",
+        json={
+            "category": "办公",
+            "subject_levels": _office_levels(),
+            "selected": selected,
+            "weights": [0.5, 0.3, 0.2],
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["评估结果"] != pytest.approx(2.83, abs=0.011)
+
+
+def test_compute_with_weights_not_summing_to_one_rejected(client: TestClient) -> None:
+    """权重和不为 1（0.5+0.3+0.3=1.1）须 400，不得静默继续算。"""
+    ids = _office_ids(client)
+    selected = [
+        {"编号": ids[loc], "市场状况指数": OFFICE_MARKET_INDEX[loc], "备注": ""}
+        for loc in OFFICE_ORDER
+    ]
+    response = client.post(
+        "/api/compute",
+        json={
+            "category": "办公",
+            "subject_levels": _office_levels(),
+            "selected": selected,
+            "weights": [0.5, 0.3, 0.3],
+        },
+    )
+    assert response.status_code == 400
+    assert "和" in response.json()["detail"]
+
+
+def test_compute_with_wrong_weight_count_rejected(client: TestClient) -> None:
+    """权重数量不是 3 个须 400。"""
+    ids = _office_ids(client)
+    selected = [
+        {"编号": ids[loc], "市场状况指数": OFFICE_MARKET_INDEX[loc], "备注": ""}
+        for loc in OFFICE_ORDER
+    ]
+    response = client.post(
+        "/api/compute",
+        json={
+            "category": "办公",
+            "subject_levels": _office_levels(),
+            "selected": selected,
+            "weights": [0.5, 0.5],
+        },
+    )
+    assert response.status_code == 400
+
+
+def test_compute_without_weights_field_still_defaults(client: TestClient) -> None:
+    """老调用方式（不传 weights 字段）须照常放行、照旧走默认 ⅓⅓⅓——不破坏既有调用方。"""
+    response = _post_compute(client, _office_ids(client))
+    assert response.status_code == 200
+    assert response.json()["评估结果"] == pytest.approx(2.83, abs=0.011)
+
+
 def test_unknown_id_rejected(client: TestClient) -> None:
     """编号不在库里必须 400，不得静默跳过。"""
     ids = _office_ids(client)
