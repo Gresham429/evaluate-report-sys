@@ -8,12 +8,15 @@
 
 凭据一律从环境变量读，**不写进代码、不进仓库**（security 规矩）：
 
-    export YIDA_APP_KEY=...          # 应用 AppKey
-    export YIDA_APP_SECRET=...       # 应用 AppSecret
-    export YIDA_SYSTEM_TOKEN=...     # 宜搭应用 SystemToken（appType）
+    export YIDA_APP_KEY=...          # 钉钉企业内部应用 AppKey（取 accessToken 用）
+    export YIDA_APP_SECRET=...       # 钉钉企业内部应用 AppSecret
+    export YIDA_APP_TYPE=APP_xxxx    # 宜搭应用编码（APP_ 开头）
+    export YIDA_SYSTEM_TOKEN=...     # 宜搭应用密钥 SystemToken
     export YIDA_FORM_UUID=FORM-xxxx  # 台账表的表单编号
     export YIDA_USER_ID=...          # 你的钉钉 userId
     uv run python tools/yida_smoke.py
+
+（或把这些写进仓库根的 .env——已 gitignore，不会提交。）
 
 跑完把整段输出发我，我据此把 save/search 的参数名和字段映射钉死。
 """
@@ -32,10 +35,23 @@ REPO = Path(__file__).resolve().parents[1]
 SNAPSHOT_SAMPLE = REPO / "台账快照样例_给宜搭测试用.json"
 
 
+def _load_dotenv() -> None:
+    """把仓库根 .env 的 KEY=VALUE 读进环境（不覆盖已设的），免装 python-dotenv。"""
+    env_file = REPO / ".env"
+    if not env_file.exists():
+        return
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip())
+
+
 def _env(name: str) -> str:
     value = os.environ.get(name, "").strip()
     if not value:
-        sys.exit(f"缺环境变量 {name}——见本文件顶部说明。")
+        sys.exit(f"缺环境变量 {name}——填进仓库根 .env 或 export，见本文件顶部说明。")
     return value
 
 
@@ -73,12 +89,16 @@ def _auth(token: str) -> dict[str, str]:
     return {"x-acs-dingtalk-access-token": token}
 
 
-def list_form_fields(token: str, system_token: str, form_uuid: str, user_id: str) -> None:
+def list_form_fields(
+    token: str, app_type: str, system_token: str, form_uuid: str, user_id: str
+) -> None:
     """拉表单结构，拿到每个字段的"字段标识"（textField_xxx）。
 
     宜搭 formDataJson 按"字段标识"填、不是中文名，先拉结构对上。端点名首跑可能要校准。
     """
-    query = urllib.parse.urlencode({"appType": system_token, "userId": user_id})
+    query = urllib.parse.urlencode(
+        {"appType": app_type, "systemToken": system_token, "userId": user_id}
+    )
     code, text = _request(
         "GET", f"{BASE}/v1.0/yida/forms/{form_uuid}/components?{query}", headers=_auth(token)
     )
@@ -86,13 +106,15 @@ def list_form_fields(token: str, system_token: str, form_uuid: str, user_id: str
 
 
 def save_row(
-    token: str, system_token: str, form_uuid: str, user_id: str, form_data: dict[str, Any]
+    token: str, app_type: str, system_token: str, form_uuid: str, user_id: str,
+    form_data: dict[str, Any],
 ) -> None:
     """往台账表写一行。form_data 的 key 是字段标识（首跑后按 schema 替真标识）。"""
     code, text = _request(
         "POST", f"{BASE}/v1.0/yida/forms/instances", headers=_auth(token),
         body={
-            "appType": system_token,
+            "appType": app_type,
+            "systemToken": system_token,
             "formUuid": form_uuid,
             "userId": user_id,
             "formDataJson": json.dumps(form_data, ensure_ascii=False),
@@ -101,11 +123,14 @@ def save_row(
     print("[save] HTTP", code, text[:500])
 
 
-def search_rows(token: str, system_token: str, form_uuid: str, user_id: str) -> None:
+def search_rows(
+    token: str, app_type: str, system_token: str, form_uuid: str, user_id: str
+) -> None:
     code, text = _request(
         "POST", f"{BASE}/v1.0/yida/forms/instances/search", headers=_auth(token),
         body={
-            "appType": system_token,
+            "appType": app_type,
+            "systemToken": system_token,
             "formUuid": form_uuid,
             "userId": user_id,
             "pageNumber": 1,
@@ -116,8 +141,10 @@ def search_rows(token: str, system_token: str, form_uuid: str, user_id: str) -> 
 
 
 def main() -> None:
+    _load_dotenv()
     app_key = _env("YIDA_APP_KEY")
     app_secret = _env("YIDA_APP_SECRET")
+    app_type = _env("YIDA_APP_TYPE")
     system_token = _env("YIDA_SYSTEM_TOKEN")
     form_uuid = _env("YIDA_FORM_UUID")
     user_id = _env("YIDA_USER_ID")
@@ -127,7 +154,7 @@ def main() -> None:
     print("拿到 token：", token[:10], "…\n")
 
     print("=== 2) 拉台账表字段结构（对字段标识）===")
-    list_form_fields(token, system_token, form_uuid, user_id)
+    list_form_fields(token, app_type, system_token, form_uuid, user_id)
     print()
 
     print("=== 3) 写一行（含快照样例）===")
@@ -139,11 +166,11 @@ def main() -> None:
         "类别": "办公",
         "快照": snapshot,
     }
-    save_row(token, system_token, form_uuid, user_id, test_row)
+    save_row(token, app_type, system_token, form_uuid, user_id, test_row)
     print()
 
     print("=== 4) 读回来核对 ===")
-    search_rows(token, system_token, form_uuid, user_id)
+    search_rows(token, app_type, system_token, form_uuid, user_id)
 
 
 if __name__ == "__main__":
