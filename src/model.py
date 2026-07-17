@@ -10,11 +10,22 @@ __all__ = ["Category", "Subject", "ConditionFactor", "ConditionGroup", "Project"
 
 
 class Category(StrEnum):
-    """估价对象类别。"""
+    """估价对象类别。值为中文，是数据身份，遍布 JSON/台账，不可改（见 §5 坑 7）。"""
 
     AGRICULTURAL = "农用"
     OFFICE = "办公"
     COMMERCIAL = "商业"
+    RESIDENTIAL = "住宅"
+    INDUSTRIAL = "工业"
+    PARKING_LAND = "停车场用地"
+    CONSTRUCTION_LAND = "建设用地"
+
+
+# land 口径的唯一来源：土地类按亩/年计租、报告用「土地」措辞。房屋类按㎡/天×365。
+# annual_value 与 is_land 都从这里取，杜绝双实现漂移。
+_LAND_CATEGORIES = frozenset(
+    {Category.AGRICULTURAL, Category.PARKING_LAND, Category.CONSTRUCTION_LAND}
+)
 
 
 @dataclass(frozen=True)
@@ -85,8 +96,8 @@ class Project:
 
     @property
     def is_land(self) -> bool:
-        """农用地类别。影响单位（亩/㎡）与估价范围措辞。"""
-        return self.category is Category.AGRICULTURAL
+        """土地类（农用/停车场用地/建设用地）。影响单位（亩/㎡）与估价范围措辞。"""
+        return self.category in _LAND_CATEGORIES
 
     @property
     def has_certificate(self) -> bool:

@@ -67,6 +67,28 @@ def test_category_values() -> None:
     assert Category.COMMERCIAL == "商业"
 
 
+def test_new_category_values() -> None:
+    assert Category.RESIDENTIAL == "住宅"
+    assert Category.INDUSTRIAL == "工业"
+    assert Category.PARKING_LAND == "停车场用地"
+    assert Category.CONSTRUCTION_LAND == "建设用地"
+
+
+def test_land_categories_are_land() -> None:
+    for cat in (Category.AGRICULTURAL, Category.PARKING_LAND, Category.CONSTRUCTION_LAND):
+        assert _project(category=cat).is_land is True
+
+
+def test_building_categories_are_not_land() -> None:
+    for cat in (
+        Category.OFFICE,
+        Category.COMMERCIAL,
+        Category.RESIDENTIAL,
+        Category.INDUSTRIAL,
+    ):
+        assert _project(category=cat).is_land is False
+
+
 def test_condition_group_holds_ordered_per_factor_descriptions() -> None:
     g = ConditionGroup(
         name="区位状况",
