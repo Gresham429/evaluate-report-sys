@@ -32,7 +32,7 @@ from typing import Any
 
 BASE = "https://api.dingtalk.com"
 REPO = Path(__file__).resolve().parents[1]
-SNAPSHOT_SAMPLE = REPO / "台账快照样例_给宜搭测试用.json"
+SNAPSHOT_SAMPLE = Path(__file__).resolve().parent / "台账快照样例_给宜搭测试用.json"
 
 
 def _load_dotenv() -> None:
