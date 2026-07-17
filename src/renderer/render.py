@@ -45,6 +45,11 @@ TEMPLATE_FILENAMES: dict[Category, str] = {
     Category.AGRICULTURAL: "farmland.docx",
     Category.OFFICE: "office.docx",
     Category.COMMERCIAL: "commercial.docx",
+    # 新四类复用两份 shape 模板（房产/土地），多对一映射；文件名 ASCII（§5 坑 7）。
+    Category.RESIDENTIAL: "lease_building.docx",
+    Category.INDUSTRIAL: "lease_building.docx",
+    Category.PARKING_LAND: "lease_land.docx",
+    Category.CONSTRUCTION_LAND: "lease_land.docx",
 }
 
 
@@ -155,6 +160,7 @@ def build_context(project: Project, pages: Sequence[AttachmentPage]) -> dict[str
         "value_date": project.value_date,
         "value_date_cn": _date_cn(project.value_date),
         "materials": project.materials,
+        "surveyor": project.surveyor,  # 现场查勘记录人员，供新 shape 模板正文引用（旧模板不引用，无副作用）
         "owner": project.owner,
         "address": project.address,
         "usage": project.usage,
