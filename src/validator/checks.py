@@ -7,16 +7,24 @@
 import logging
 import re
 import zipfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from src.engine.annual import annual_value
+from src.engine.knowledge import Knowledge, parse_range
 from src.model import Project
 from src.prose.composer import area_unit
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Warning", "validate", "check_dispersion", "DISPERSION_THRESHOLD"]
+__all__ = [
+    "Warning",
+    "validate",
+    "check_dispersion",
+    "check_coefficient_overrides",
+    "DISPERSION_THRESHOLD",
+]
 
 # 比准价格离散度提示阈值。实测农用 0.01、办公 0.05、商业 0.08 均属正常。
 DISPERSION_THRESHOLD = 0.20
@@ -74,6 +82,48 @@ def check_dispersion(dispersion: float) -> tuple[Warning, ...]:
             ),
         )
     return ()
+
+
+def check_coefficient_overrides(
+    knowledge: Knowledge, overrides: Mapping[str, float]
+) -> tuple[Warning, ...]:
+    """逐份调过的系数是否落在基础表 J 列给出的调整范围外。
+
+    单份偏离是「自由覆盖」——本函数不阻断，只提示。J 列范围本就是估价师参考用
+    的软边界（`Factor.调整范围` 的注释：实测 I 列系数有时本就落在 J 列范围外），
+    系统没有资格替他把关，只能替他看一眼、提醒他核对是不是有意为之。
+
+    Args:
+        knowledge: 覆盖前后皆可传——`调整范围` 字段不受 `apply_coefficient_overrides`
+            影响，原样从基础表带过来。
+        overrides: {因素名: 新系数}，只检查这些因素；未覆盖的因素本来就没变，不检查。
+
+    Returns:
+        提示元组，正常（或该因素无范围可查）时为空。
+    """
+    warnings: list[Warning] = []
+    by_name = {f.name: f for f in knowledge.factors}
+    for name, value in overrides.items():
+        factor = by_name.get(name)
+        if factor is None:
+            # 未知因素名不在这里报错——那是 apply_coefficient_overrides 的职责
+            # （写入路径要炸），本函数只管「已知因素、值是否越界」这一件事。
+            continue
+        bounds = parse_range(factor.调整范围)
+        if bounds is None:
+            continue
+        low, high = bounds
+        if not (low <= value <= high):
+            warnings.append(
+                Warning(
+                    code="COEFFICIENT_OUT_OF_RANGE",
+                    message=(
+                        f"「{name}」调整后系数 {value:g} 超出基础表给出的调整范围 "
+                        f"{low:g}-{high:g}，请核对是否为有意的偏离。"
+                    ),
+                )
+            )
+    return tuple(warnings)
 
 
 def _check_required(project: Project) -> list[Warning]:

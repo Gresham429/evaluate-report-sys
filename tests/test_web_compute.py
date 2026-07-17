@@ -223,6 +223,90 @@ def test_compute_without_weights_field_still_defaults(client: TestClient) -> Non
     assert response.json()["评估结果"] == pytest.approx(2.83, abs=0.011)
 
 
+# 办公基础表「重要场所距离」原系数 1.0，调整范围 2-4（见 tests/test_ledger_replay.py
+# 顶部同名常量的注释）。
+COEFFICIENT_OVERRIDE_FACTOR = "重要场所距离"
+
+
+def test_compute_with_coefficient_override_within_range_changes_result_no_warning(
+    client: TestClient,
+) -> None:
+    """系数覆盖在调整范围内（2-4 内取 3.0）：结果须与基础表原值不同，且不带越界提示。"""
+    ids = _office_ids(client)
+    selected = [
+        {"编号": ids[loc], "市场状况指数": OFFICE_MARKET_INDEX[loc], "备注": ""}
+        for loc in OFFICE_ORDER
+    ]
+    response = client.post(
+        "/api/compute",
+        json={
+            "category": "办公",
+            "subject_levels": _office_levels(),
+            "selected": selected,
+            "coefficient_overrides": {COEFFICIENT_OVERRIDE_FACTOR: 3.0},
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["评估结果"] != pytest.approx(2.83, abs=0.011)
+    codes = {w["code"] for w in body["提示"]}
+    assert "COEFFICIENT_OUT_OF_RANGE" not in codes
+
+
+def test_compute_with_coefficient_override_out_of_range_warns_but_still_200(
+    client: TestClient,
+) -> None:
+    """系数覆盖超出调整范围（2-4，填 6.0）——只软提示，不阻断，仍是 200 且给出结果。"""
+    ids = _office_ids(client)
+    selected = [
+        {"编号": ids[loc], "市场状况指数": OFFICE_MARKET_INDEX[loc], "备注": ""}
+        for loc in OFFICE_ORDER
+    ]
+    response = client.post(
+        "/api/compute",
+        json={
+            "category": "办公",
+            "subject_levels": _office_levels(),
+            "selected": selected,
+            "coefficient_overrides": {COEFFICIENT_OVERRIDE_FACTOR: 6.0},
+        },
+    )
+    assert response.status_code == 200, "越界的系数覆盖不该被阻断——软提示，不硬卡"
+    body = response.json()
+    assert body["评估结果"] != pytest.approx(2.83, abs=0.011)
+    warnings = [w for w in body["提示"] if w["code"] == "COEFFICIENT_OUT_OF_RANGE"]
+    assert len(warnings) == 1
+    assert COEFFICIENT_OVERRIDE_FACTOR in warnings[0]["message"]
+
+
+def test_compute_with_unknown_coefficient_override_rejected(client: TestClient) -> None:
+    """覆盖里的因素名基础表里没有——须 400，不得静默忽略。"""
+    ids = _office_ids(client)
+    selected = [
+        {"编号": ids[loc], "市场状况指数": OFFICE_MARKET_INDEX[loc], "备注": ""}
+        for loc in OFFICE_ORDER
+    ]
+    response = client.post(
+        "/api/compute",
+        json={
+            "category": "办公",
+            "subject_levels": _office_levels(),
+            "selected": selected,
+            "coefficient_overrides": {"这个因素不存在": 3.0},
+        },
+    )
+    assert response.status_code == 400
+
+
+def test_compute_without_coefficient_overrides_field_still_matches_golden(
+    client: TestClient,
+) -> None:
+    """老调用方式（不传 coefficient_overrides 字段）须照常放行、复现 2.83——不破坏既有调用方。"""
+    response = _post_compute(client, _office_ids(client))
+    assert response.status_code == 200
+    assert response.json()["评估结果"] == pytest.approx(2.83, abs=0.011)
+
+
 def test_unknown_id_rejected(client: TestClient) -> None:
     """编号不在库里必须 400，不得静默跳过。"""
     ids = _office_ids(client)

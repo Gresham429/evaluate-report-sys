@@ -36,7 +36,7 @@ from src.engine.compute import (
     default_weights,
 )
 from src.engine.inputs import ComparisonInput, from_excel
-from src.engine.knowledge import Knowledge
+from src.engine.knowledge import Knowledge, apply_coefficient_overrides
 from src.engine.methods import get_method
 from src.engine.methods.base import Instance, Result
 from src.extractor.condition import GROUP_PREFIXES, read_survey_conditions
@@ -48,7 +48,7 @@ from src.knowledge_base.store import (
     BaseTableStore,
     VersionInfo,
 )
-from src.ledger.model import BaseTableUse, InstanceUse, LedgerEntry, MethodUse
+from src.ledger.model import BaseTableUse, Deviation, InstanceUse, LedgerEntry, MethodUse
 from src.ledger.model import to_dict as ledger_to_dict
 from src.ledger.replay import replay
 from src.ledger.store import DEFAULT_LEDGER_DIR, LedgerStore
@@ -58,7 +58,7 @@ from src.library.store import DEFAULT_STORE_PATH, InstanceStore
 from src.model import Category, ConditionFactor, ConditionGroup, Project, Subject
 from src.prose.composer import area_unit, price_unit
 from src.renderer.render import render
-from src.validator.checks import check_dispersion, validate
+from src.validator.checks import check_coefficient_overrides, check_dispersion, validate
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +142,33 @@ def _parse_weights(raw: object) -> tuple[float, ...] | None:
     if abs(total - 1.0) > _WEIGHT_SUM_TOLERANCE:
         raise HTTPException(status_code=400, detail=f"权重之和必须为 1，实收：{total}")
     return weights
+
+
+def _parse_coefficient_overrides(raw: object) -> dict[str, float]:
+    """解析请求里的逐因素系数覆盖；字段缺失（`None`）返回空字典，不覆盖任何因素。
+
+    单份偏离是「自由覆盖」——不设审批门槛，改哪个因素、改成多少全由估价师
+    决定，本函数只管接住、转成合法类型，不做范围校验（范围提示见
+    `check_coefficient_overrides`，只提示不阻断）。未知因素名同样不在这里挡：
+    留给 `apply_coefficient_overrides` 去报错，理由见该函数 docstring——
+    键入错误理应在真正应用覆盖时被截住。
+
+    Raises:
+        HTTPException: raw 不是字典，或某项系数不是有效数字。
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise HTTPException(
+            status_code=400,
+            detail=f"coefficient_overrides 须为 {{因素名: 系数}} 字典：{raw!r}",
+        )
+    try:
+        return {str(k): float(v) for k, v in raw.items()}
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400, detail=f"coefficient_overrides 系数不是有效数字：{raw!r}"
+        ) from exc
 
 
 def _asset_condition_groups_from_form(
@@ -299,6 +326,64 @@ def _validate_weights(weights: object, num_instances: int) -> None:
         raise ValueError(f"台账权重非法：和需为 1，实收 {total}")
 
 
+def _apply_ledger_coefficient_overrides(
+    raw: dict[str, Any], knowledge: Knowledge
+) -> tuple[Knowledge, tuple[Deviation, ...]]:
+    """把台账 payload 里的逐因素系数覆盖应用到基础知识，产出「实际知识」+「偏离」。
+
+    这是台账落盘侧的坑：单份偏离必须存成「基线版本 + 差异」（`Deviation` 的
+    docstring），而不是悄悄换一个基础表版本——`基线版本`/`实际指纹` 不变，
+    差异单独记进 `偏离`。`实际知识` 才是重放要用的那份（`replay.py` 读的正是
+    `entry.基础表.实际知识`），必须是覆盖后的版本，否则重放会悄悄用回基础表
+    原系数，算出另一个数，且看不出哪里错了。
+
+    未知因素名不在本函数里挡：`apply_coefficient_overrides` 自己会报
+    `ValueError`，且**必须让它原样炸出去**——写入路径宁可让这次生成的台账
+    记不上（`/api/render` 外层广播 except 兜底：报告照常出、只是台账跳过），
+    也不能把一条覆盖了根本不存在的因素的记录悄悄写进永久台账。
+
+    Args:
+        raw: `/api/render` 收到的台账 payload，可能带 `coefficient_overrides`
+            （`{因素名: 新系数}`）、`偏离理由`（全局理由）、
+            `coefficient_override_reasons`（`{因素名: 理由}`，逐因素理由，
+            命中时优先于全局理由）。
+        knowledge: 该类别当前使用的基础 Knowledge（覆盖前）。
+
+    Returns:
+        (实际知识, 偏离)：无覆盖时原样返回 `knowledge` 与空元组。
+
+    Raises:
+        ValueError: `coefficient_overrides` 里出现 `knowledge` 中不存在的因素名。
+    """
+    raw_overrides = raw.get("coefficient_overrides")
+    if not isinstance(raw_overrides, dict) or not raw_overrides:
+        return knowledge, ()
+
+    overrides = {str(k): float(v) for k, v in raw_overrides.items()}
+    base_by_name = {f.name: f for f in knowledge.factors}
+    overridden = apply_coefficient_overrides(knowledge, overrides)  # 未知因素名在此报错
+
+    global_reason = str(raw.get("偏离理由", ""))
+    raw_reasons = raw.get("coefficient_override_reasons")
+    per_factor_reasons = (
+        {str(k): str(v) for k, v in raw_reasons.items()}
+        if isinstance(raw_reasons, dict)
+        else {}
+    )
+    偏离 = tuple(
+        Deviation(
+            因素=name,
+            字段="每差1档修正系数",
+            原值=str(base_by_name[name].coefficient),
+            现值=str(value),
+            审批单号="",  # 自由偏离：本版不设审批门槛，见类头注释
+            理由=per_factor_reasons.get(name, global_reason),
+        )
+        for name, value in overrides.items()
+    )
+    return overridden, 偏离
+
+
 def _build_ledger_entry(project: Project, raw: dict[str, Any] | None) -> LedgerEntry:
     """按一次生成攒出台账记录。
 
@@ -331,6 +416,10 @@ def _build_ledger_entry(project: Project, raw: dict[str, Any] | None) -> LedgerE
     knowledge = base_store.load(category, str(fingerprint_raw) if fingerprint_raw else None)
     current = base_store.current(category)
     baseline = str(fingerprint_raw) if fingerprint_raw else (current.指纹 if current else "")
+
+    # 单份偏离：覆盖为空即原样返回 knowledge 与空元组，旧 payload（没有
+    # coefficient_overrides 字段）行为不变，向后兼容。
+    knowledge, 偏离 = _apply_ledger_coefficient_overrides(raw, knowledge)
 
     levels = {str(k): str(v) for k, v in dict(raw["subject_levels"]).items()}
     inst_store = InstanceStore(_store_path())
@@ -368,9 +457,12 @@ def _build_ledger_entry(project: Project, raw: dict[str, Any] | None) -> LedgerE
         类别=category,
         基础表=BaseTableUse(
             基线版本=baseline,
-            # 今天恒空——偏离功能未上线（用户决定：只留口子）。
-            偏离=(),
+            偏离=偏离,
+            # 有覆盖时 knowledge 已被 _apply_ledger_coefficient_overrides 换成
+            # 覆盖后的那份——重放读的正是这里，不是基础表库里的原始版本。
             实际知识=knowledge,
+            # 偏离是「基线版本 + 差异」，不是「另一个版本」：实际指纹仍等于
+            # 基线版本，差异单独记在偏离里（Deviation 的 docstring）。
             实际指纹=baseline,
         ),
         估价对象档次=levels,
@@ -540,6 +632,11 @@ def create_app() -> FastAPI:
 
         不做推荐；市场状况指数须逐条现填，系统不推算、不给默认值——
         缺失时 400，不得静默取默认值继续算。
+
+        `coefficient_overrides`（`{因素名: 新系数}`）是单份报告的自由覆盖：
+        不设审批门槛，缺省不传即维持基础表原系数不变。覆盖后若某因素落在
+        基础表调整范围外，只在 `提示` 里软警告，不阻断——是否合理由估价师
+        判断。未知因素名仍是硬错误（400），键入错误不该被悄悄吞掉。
         """
         raw_selected = payload.get("selected")
         if not isinstance(raw_selected, list):
@@ -563,14 +660,24 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         weights = _parse_weights(payload.get("weights"))
+        coefficient_overrides = _parse_coefficient_overrides(
+            payload.get("coefficient_overrides")
+        )
 
         try:
             store = InstanceStore(_store_path())
             store.load()
+            # 覆盖为空即维持原样——不新建一份等价的 Knowledge，省一次分配，
+            # 也让「没传 coefficient_overrides」与旧行为字节级一致。
+            computed_knowledge = (
+                apply_coefficient_overrides(knowledge, coefficient_overrides)
+                if coefficient_overrides
+                else knowledge
+            )
             result = compute_from_selection(
                 ComparisonInput(
                     category=category,
-                    knowledge=knowledge,
+                    knowledge=computed_knowledge,
                     subject_levels={str(k): str(v) for k, v in raw_levels.items()},
                 ),
                 raw_selected,
@@ -578,7 +685,17 @@ def create_app() -> FastAPI:
                 weights=weights,
             )
         except ValueError as exc:
+            # 未知因素名（apply_coefficient_overrides 报的）与选实例/档次相关的
+            # 错误走同一条 400 路径——都是「请求给的东西系统接不住」。
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        # 重算出的离散度同样要过校验——它会跟着结果进报告，而 /api/extract
+        # 那次校验查的是 Excel 里的旧值。**只提示，不阻断**：换不换实例是
+        # 估价师的判断。系数越界提示同理，且只在真有覆盖时才查——用基础表
+        # 原始 knowledge 查范围（调整范围字段覆盖前后一致，用哪份都一样）。
+        提示 = list(check_dispersion(result.离散度))
+        if coefficient_overrides:
+            提示 += check_coefficient_overrides(knowledge, coefficient_overrides)
 
         return {
             "比准价格": list(result.比准价格),
@@ -587,10 +704,7 @@ def create_app() -> FastAPI:
             # 单位随数字一起走：农用 1399.26 与办公 2.83 差 500 倍，
             # 让界面自己去配单位，早晚配错一次。
             "单价单位": price_unit(category),
-            # 重算出的离散度同样要过校验——它会跟着结果进报告，而 /api/extract
-            # 那次校验查的是 Excel 里的旧值。**只提示，不阻断**：换不换实例是
-            # 估价师的判断。
-            "提示": [asdict(w) for w in check_dispersion(result.离散度)],
+            "提示": [asdict(w) for w in 提示],
         }
 
     @app.post("/api/annual-values")

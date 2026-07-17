@@ -180,3 +180,74 @@ def test_invalid_weights_sum_does_not_break_report_generation(client: TestClient
         "ledger": json.dumps(bad, ensure_ascii=False),
     })
     assert response.status_code == 200, "权重验证失败不该让报告生成失败"
+
+
+def test_unknown_coefficient_override_does_not_break_report_generation(
+    client: TestClient,
+) -> None:
+    """系数覆盖的因素名不存在于基础表——台账记不上，但报告照常生成。
+
+    与权重非法（上两条测试）同一类：写入路径宁可让台账这一条记不上，
+    也不能让报告生成失败——报告是估价师要交的东西，台账是我们要留的账，
+    冲突时先保住报告。
+    """
+    bad = _ledger_payload(client)
+    bad["coefficient_overrides"] = {"这个因素不存在": 3.0}
+    project = _project(client)
+    response = client.post("/api/render", data={
+        "project": json.dumps(project, ensure_ascii=False),
+        "ledger": json.dumps(bad, ensure_ascii=False),
+    })
+    assert response.status_code == 200, "系数覆盖验证失败不该让报告生成失败"
+    # 台账没记上——ValueError 被外层广播 except 捕获、只写日志，不连累报告。
+    assert client.get("/api/ledger").json()["entries"] == []
+
+
+def test_ledger_entry_records_coefficient_deviation(client: TestClient) -> None:
+    """带合法系数覆盖生成报告——台账须记下覆盖后的知识与偏离，`结果` 与覆盖后的重算一致。"""
+    items = client.get("/api/instances", params={"category": "办公"}).json()["instances"]
+    selected = [
+        {"编号": i["编号"], "市场状况指数": OFFICE_MARKET_INDEX[i["位置"]], "备注": ""}
+        for i in items
+    ]
+    subject_levels = from_excel(CASES["办公"]).subject_levels
+    overrides = {"重要场所距离": 3.0}
+    computed = client.post("/api/compute", json={
+        "category": "办公",
+        "subject_levels": subject_levels,
+        "selected": selected,
+        "coefficient_overrides": overrides,
+    }).json()
+    assert computed["评估结果"] != pytest.approx(2.83, abs=0.011), "前提：覆盖须改变结果"
+
+    payload = {
+        "category": "办公",
+        "base_table": None,
+        "subject_levels": subject_levels,
+        "selected": selected,
+        "coefficient_overrides": overrides,
+        "偏离理由": "现场勘察结果与基础表默认档次不符",
+        "result": {
+            "比准价格": computed["比准价格"],
+            "评估结果": computed["评估结果"],
+            "离散度": computed["离散度"],
+        },
+    }
+    _render(client, _project(client), payload)
+
+    记录号 = client.get("/api/ledger").json()["entries"][0]["记录号"]
+    detail = client.get(f"/api/ledger/{记录号}").json()
+    偏离 = detail["基础表"]["偏离"]
+    assert len(偏离) == 1
+    assert 偏离[0]["因素"] == "重要场所距离"
+    assert 偏离[0]["现值"] == "3.0"
+    assert 偏离[0]["审批单号"] == ""
+    assert 偏离[0]["理由"] == "现场勘察结果与基础表默认档次不符"
+    factors = {f["名称"]: f["系数"] for f in detail["基础表"]["实际知识"]["因素"]}
+    assert factors["重要场所距离"] == 3.0
+    assert detail["结果"]["评估结果"] == computed["评估结果"]
+
+    # 照台账重算——须复现覆盖后的结果，而非基础表原系数会算出的 2.83。
+    replay_body = client.post(f"/api/ledger/{记录号}/replay").json()
+    assert replay_body["一致"] is True
+    assert replay_body["重算得的"]["评估结果"] == pytest.approx(computed["评估结果"], abs=0.011)
