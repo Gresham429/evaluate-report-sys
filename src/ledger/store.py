@@ -10,11 +10,10 @@
 JSON 而非 SQLite：单机、数据量小、无并发，且须人类可读可手改可备份。
 """
 
-import json
 import logging
-import os
 from pathlib import Path
 
+from src.ledger.backend import LedgerBackend, LocalFileLedgerBackend
 from src.ledger.model import LedgerEntry, from_dict, to_dict
 from src.paths import data_dir
 
@@ -28,8 +27,12 @@ DEFAULT_LEDGER_DIR = data_dir() / "生成台账"
 class LedgerStore:
     """报告生成台账。只增不改。"""
 
-    def __init__(self, path: Path = DEFAULT_LEDGER_DIR) -> None:
-        self.path = path
+    def __init__(
+        self, path: Path = DEFAULT_LEDGER_DIR, *, backend: LedgerBackend | None = None
+    ) -> None:
+        self.path = path  # 保留：既有调用点/测试仍读它
+        # 持久化委托给可插拔后端；默认本地文件后端 → 既有行为一字不变。
+        self._backend: LedgerBackend = backend or LocalFileLedgerBackend(path)
 
     def append(self, entry: LedgerEntry) -> str:
         """记一条，立即落盘。
@@ -41,19 +44,7 @@ class LedgerStore:
             ValueError: 记录号形状不安全（含路径分隔符、空字节，或是 `.`/`..`）。
         """
         self._校验记录号(entry.记录号)
-        self.path.mkdir(parents=True, exist_ok=True)
-        stamp = entry.生成时间.strftime("%Y%m%d-%H%M%S")
-        # 文件名只用时间戳与记录号：报告编号含 [] 等字符，既要清洗又会被 glob
-        # 当元字符吞掉。报告编号在文件内容里，够查。
-        file = self.path / f"{stamp}-{entry.记录号}.json"
-        text = json.dumps(to_dict(entry), ensure_ascii=False, indent=2)
-
-        # 先写临时文件再原子替换：直接写若中途崩掉会留下截断的半份 JSON，
-        # 而台账的意义就是「记下来的必须作数」。
-        tmp = file.with_suffix(".json.tmp")  # 不叫 *.json，免得被 list_all 扫到
-        tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, file)
-
+        self._backend.append(entry.记录号, entry.生成时间, to_dict(entry))
         logger.info("记台账 %s（报告 %s，经手人 %s）", entry.记录号, entry.报告编号, entry.经手人)
         return entry.记录号
 
@@ -110,16 +101,15 @@ class LedgerStore:
             raise ValueError(f"记录号不合法：{记录号!r}")
 
     def _读全部(self) -> list[LedgerEntry]:
-        """读出目录下的全部记录。坏掉的单份跳过，不连累其余。"""
-        if not self.path.exists():
-            logger.debug("台账目录不存在，视为空：%s", self.path)
-            return []
+        """从后端读出全部记录。还原失败的单条跳过，不连累其余。
+
+        坏文件的容错（文件明说可手改、改坏一份不该拖垮整份台账）现由本地文件
+        后端在 iter_payloads 里兜；这里再兜一层"payload 能读出但字段坏"的还原失败。
+        """
         entries: list[LedgerEntry] = []
-        for file in self.path.glob("*.json"):
+        for payload in self._backend.iter_payloads():
             try:
-                entries.append(from_dict(json.loads(file.read_text(encoding="utf-8"))))
-            except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-                # 台账文件明说可以手改，改坏就得容错：一份坏文件不该让整个台账
-                # 打不开，否则其余完好的记录也一起查不了。
-                logger.warning("台账文件读不出，已跳过：%s", file, exc_info=True)
+                entries.append(from_dict(payload))
+            except (KeyError, TypeError, ValueError):
+                logger.warning("台账 payload 还原失败，已跳过", exc_info=True)
         return entries
