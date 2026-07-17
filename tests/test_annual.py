@@ -32,6 +32,32 @@ def test_reproduces_golden_rows(
     assert annual_value(category, area, unit_price) == expected
 
 
+NEW_GOLDEN_ROWS = [
+    (Category.RESIDENTIAL, 342.59, 1.15, 143802),   # 房产 ×365
+    (Category.INDUSTRIAL, 342.59, 1.33, 166310),    # 房产 ×365
+    (Category.PARKING_LAND, 342.59, 1.22, 418),     # 土地 不×365
+    (Category.CONSTRUCTION_LAND, 342.59, 1.24, 425),  # 土地 不×365
+]
+
+
+@pytest.mark.parametrize(("category", "area", "unit_price", "expected"), NEW_GOLDEN_ROWS)
+def test_new_category_annual(
+    category: Category, area: float, unit_price: float, expected: int
+) -> None:
+    """新四类一览表首行（Task0 探明的 L49）都必须算得出来。"""
+    assert annual_value(category, area, unit_price) == expected
+
+
+def test_land_categories_do_not_multiply_by_days() -> None:
+    """土地类（农用/停车场用地/建设用地）按年计租，房屋类×365。"""
+    from src.model import _LAND_CATEGORIES
+
+    for cat in _LAND_CATEGORIES:
+        assert annual_value(cat, 10.0, 100.0) == 1000
+    for cat in (Category.RESIDENTIAL, Category.INDUSTRIAL):
+        assert annual_value(cat, 10.0, 100.0) == 1000 * DAYS_PER_YEAR
+
+
 def test_agricultural_does_not_multiply_by_days() -> None:
     """农用按年计租，房屋类按天计租——两者差 365 倍，混了即错 365 倍。"""
     land = annual_value(Category.AGRICULTURAL, 50.0, 1400.0)
