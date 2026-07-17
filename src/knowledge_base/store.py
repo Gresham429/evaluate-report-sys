@@ -15,7 +15,6 @@ JSON 而非 SQLite：理由同实例库——单机单用户、数据量小、�
 也不会有内存与磁盘不一致的余地。
 """
 
-import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -28,6 +27,7 @@ from src.extractor.survey import extract_survey
 # 取别名：本模块的 load()/_version_path() 对外的形参就叫 fingerprint（指纹是版本号，
 # 这个名字对调用方最自然），裸导入同名函数会在函数体内被形参遮蔽——`fingerprint(k)`
 # 会变成 `'str' object is not callable`。
+from src.knowledge_base.backend import BaseTableBackend, LocalFileBaseTableBackend
 from src.knowledge_base.fingerprint import fingerprint as compute_fingerprint
 from src.paths import data_dir
 from src.model import Category
@@ -66,8 +66,12 @@ class ImportResult:
 class BaseTableStore:
     """基础表版本库。按类别分版，以内容指纹作版本号，旧版永不覆盖。"""
 
-    def __init__(self, path: Path = DEFAULT_STORE_DIR) -> None:
-        self.path = path
+    def __init__(
+        self, path: Path = DEFAULT_STORE_DIR, *, backend: BaseTableBackend | None = None
+    ) -> None:
+        self.path = path  # 保留：既有调用点/测试仍读它
+        # 持久化委托给可插拔后端；默认本地文件后端 → 既有行为一字不变。
+        self._backend: BaseTableBackend = backend or LocalFileBaseTableBackend(path)
 
     # ------------------------------------------------------------ 对外
 
@@ -108,23 +112,19 @@ class BaseTableStore:
             logger.warning("基础表 %s 有因素未在实勘表分组里命中，将不分组显示", path.name)
         category = self._detect_category(path)
         digest = compute_fingerprint(knowledge)
-        target = self._version_path(category, digest)
 
         existing = self._find(category, digest)
         if existing is not None:
-            # 内容没变就什么都不做：不重写文件（不可变），不重复记台账，也不改写
+            # 内容没变就什么都不做：不重写版本（不可变），不重复记台账，也不改写
             # 首次导入时间——那个时间是「这版何时进的库」的事实。
-            if not target.exists():
-                # 除非文件没了（人工误删、备份不全）。此时必须补回：手里还攥着源头
+            if not self._backend.version_exists(category.value, digest):
+                # 除非版本没了（人工误删、备份不全）。此时必须补回：手里还攥着源头
                 # Excel 却救不回旧版本，直接打在「能复现」上，而重导同一份 Excel
-                # 正是估价师唯一会想到的自救动作。补文件不补台账——这版何时进的库
+                # 正是估价师唯一会想到的自救动作。补版本不补台账——这版何时进的库
                 # 是既成事实，不该被一次修复改写成今天。
-                self._write_version(target, knowledge)
+                self._backend.write_version(category.value, digest, self.to_dict(knowledge))
                 logger.warning(
-                    "基础表 %s 版本 %s 的文件缺失，已按台账补回：%s",
-                    category.value,
-                    digest,
-                    target.name,
+                    "基础表 %s 版本 %s 缺失，已按台账补回", category.value, digest
                 )
             logger.info("基础表 %s 指纹 %s 已在库中，未新增版本", category.value, digest)
             return ImportResult(版本=existing, 是否新版=False)
@@ -135,16 +135,16 @@ class BaseTableStore:
             导入时间=now if now is not None else datetime.now(),
             来源文件名=path.name,
         )
-        # 文件已在、台账却无记录（人工拷入等）时只补台账不动文件：落了盘的版本一律
+        # 版本已在、台账却无记录（人工拷入等）时只补台账不动版本：落了盘的版本一律
         # 不可变，而同指纹即同内容，重写只会写出一模一样的字节，徒然给「旧版本永不
-        # 覆盖」开一道口子。文件是否名副其实交给 load() 校验，不在此处臆断。
-        if not target.exists():
-            self._write_version(target, knowledge)
+        # 覆盖」开一道口子。版本是否名副其实交给 load() 校验，不在此处臆断。
+        if not self._backend.version_exists(category.value, digest):
+            self._backend.write_version(category.value, digest, self.to_dict(knowledge))
         self._append(info)
         logger.info(
-            "导入基础表 %s → %s（%d 个因素，来源 %s）",
+            "导入基础表 %s 版本 %s（%d 个因素，来源 %s）",
             category.value,
-            target.name,
+            digest,
             len(knowledge.factors),
             path.name,
         )
@@ -173,24 +173,21 @@ class BaseTableStore:
                 )
             fingerprint = latest.指纹
 
-        target = self._version_path(category, fingerprint)
-        if not target.exists():
-            raise FileNotFoundError(
-                f"{category.value} 类基础表无版本 {fingerprint}：{target}"
-            )
-        knowledge = self.from_dict(json.loads(target.read_text(encoding="utf-8")))
+        payload = self._backend.read_version(category.value, fingerprint)
+        if payload is None:
+            raise FileNotFoundError(f"{category.value} 类基础表无版本 {fingerprint}")
+        knowledge = self.from_dict(payload)
 
-        # 版本文件是人类可读可手改的 JSON，那手改就迟早会发生。而指纹本就是这份
-        # 内容的哈希，验一次即可把文件名从「标签」变成「凭据」：内容与指纹对不上
+        # 版本内容是人类可读可手改的 JSON，那手改就迟早会发生。而指纹本就是这份
+        # 内容的哈希，验一次即可把版本号从「标签」变成「凭据」：内容与指纹对不上
         # 就说明它已不是当初存进来的那一版。不验的话，「拿 v1 重算 2026-03 那份
         # 报告」会静默算出另一个数——那正是本模块要防的事故，且无声无息。
         # 校验的是**知识**而非字节：改缩进、调键序不算改动，改系数才算。
         actual = compute_fingerprint(knowledge)
         if actual != fingerprint:
             raise ValueError(
-                f"基础表版本文件与指纹不符，疑被改动：{target}"
-                f"（文件名称 {fingerprint}，实际内容为 {actual}）。"
-                f"基础表要改请改 Excel 后重导，重导会落成新版本。"
+                f"基础表版本与指纹不符，疑被改动（{category.value}：版本号 {fingerprint}，"
+                f"实际内容为 {actual}）。基础表要改请改 Excel 后重导，重导会落成新版本。"
             )
         return knowledge
 
@@ -272,41 +269,13 @@ class BaseTableStore:
 
     # ------------------------------------------------------------ 内部
 
-    def _version_path(self, category: Category, fingerprint: str) -> Path:
-        return self.path / f"{category.value}-{fingerprint}.json"
-
-    def _write_version(self, target: Path, knowledge: Knowledge) -> None:
-        """落一份版本文件。UTF-8、缩进、不转义中文——须人类可读可查。
-
-        只在文件不存在时被调用：已落盘的版本不可变。
-        """
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(
-            json.dumps(self.to_dict(knowledge), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-
-    def _ledger_path(self) -> Path:
-        return self.path / LEDGER_NAME
-
     def _read_ledger(self) -> tuple[VersionInfo, ...]:
-        """读台账。文件不存在时视为空库——首次运行时它本就不存在。
+        """从后端读版本台账。
 
-        台账损坏（非法 JSON、字段缺失）时**如实抛错，不吞**：台账是「哪版何时
-        从哪来」的唯一记录，静默当空库会让下一次导入把已有版本重记一遍，等于拿
-        错误数据盖掉事故现场。版本文件名已编码类别与指纹，人工重建台账是可行的
-        （只丢导入时间与来源文件名），但那是有意识的修复动作，不该由本函数替用户
-        擅自决定。
-
-        Raises:
-            json.JSONDecodeError: 台账不是合法 JSON。
-            KeyError / ValueError: 台账字段缺失或非法（如类别不是已知枚举值）。
+        损坏时如实抛错、不吞（后端 read_index 抛 JSONDecodeError，本处构造
+        VersionInfo 时抛 KeyError/ValueError）：台账是「哪版何时从哪来」的唯一记录，
+        静默当空库会让下次导入把已有版本重记一遍，等于拿错误数据盖掉事故现场。
         """
-        path = self._ledger_path()
-        if not path.exists():
-            logger.debug("基础表台账不存在，视为空库：%s", path)
-            return ()
-        raw = json.loads(path.read_text(encoding="utf-8"))
         return tuple(
             VersionInfo(
                 类别=Category(str(r["类别"])),
@@ -314,24 +283,18 @@ class BaseTableStore:
                 导入时间=datetime.fromisoformat(str(r["导入时间"])),
                 来源文件名=str(r["来源文件名"]),
             )
-            for r in raw
+            for r in self._backend.read_index()
         )
 
     def _append(self, info: VersionInfo) -> None:
-        """追加一条台账。UTF-8、缩进、不转义中文——须人类可读可手改。"""
-        entries = [*self._read_ledger(), info]
-        payload = [
+        """追加一条版本台账。"""
+        self._backend.append_index(
             {
-                "类别": e.类别.value,
-                "指纹": e.指纹,
-                "导入时间": e.导入时间.isoformat(),
-                "来源文件名": e.来源文件名,
+                "类别": info.类别.value,
+                "指纹": info.指纹,
+                "导入时间": info.导入时间.isoformat(),
+                "来源文件名": info.来源文件名,
             }
-            for e in entries
-        ]
-        self._ledger_path().parent.mkdir(parents=True, exist_ok=True)
-        self._ledger_path().write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
     def _find(self, category: Category, fingerprint: str) -> VersionInfo | None:
