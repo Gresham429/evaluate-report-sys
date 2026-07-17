@@ -172,6 +172,14 @@
   .factor.unset select { border-left: 2px solid var(--seal); }
   .factor textarea { margin-bottom: .35rem; }
 
+  /* ── 单份系数偏离（肆步，因素档次旁） ─────────────── */
+  .coefCtl { display: flex; align-items: center; gap: .45rem; margin: .2rem 0 .35rem; }
+  .coefCtl .coefLabel { font-size: .72rem; color: var(--ink-3); letter-spacing: .05em; }
+  .coefInput { width: 4.4rem; font-family: var(--num); text-align: right; }
+  .coefInput.changed { border-left: 2px solid var(--seal); background: var(--seal-soft); }
+  .rangeHint { font-size: .68rem; color: var(--ink-3); font-family: var(--num); }
+  #coefReason { margin-top: .6rem; }
+
   /* 资产状况按分组分节：区位/实物/权益，每节标题在前、该组因素网格在后。 */
   .condGroupTitle {
     margin: 1.4rem 0 0; padding-bottom: .3rem;
@@ -345,9 +353,15 @@
         <h2>估价对象因素档次 <span class="sub" id="levelsHint"></span></h2>
         <div class="note">
           档次选项全部来自基础表——估价师维护基础表即维护选项，系统不编造档次。<br>
-          每项因素先写资产状况描述（据实手写，是选档次的依据），再选档次；描述随报告一并生成。
+          每项因素先写资产状况描述（据实手写，是选档次的依据），再选档次；描述随报告一并生成。<br>
+          每项因素的「每差1档修正系数」默认取基础表原值，可按本份报告的实际情况自由改写——
+          不设审批门槛，改动会随报告记入台账（单份偏离）；调整范围仅供参考，超出不阻断重算或生成。
         </div>
         <div id="factors"></div>
+        <label style="display:block;margin-top:.8rem">
+          <span style="font-size:.72rem;color:var(--ink-3);letter-spacing:.05em">系数偏离理由（选填，改动系数后建议注明）</span>
+          <textarea id="coefReason" placeholder="据实说明为何调整——用于台账留痕，不影响生成"></textarea>
+        </label>
       </div>
     </section>
 
@@ -476,6 +490,9 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
 // ── 状态 ──────────────────────────────────────────────────
 let currentProject = null;   // 唯一的项目状态，/api/render 提交的就是它
 let subjectLevels = {};      // 28 个因素档次，/api/compute 用的就是这份
+// 单份系数偏离：{因素名: 新系数}，只装真正改过的因素（等于基础表原值即删除），
+// /api/compute 与台账（随 lastCompute 提交给 /api/render）都发送这同一份。
+let coefficientOverrides = {};
 let factors = [];            // 当前类别的因素与档次选项，来自基础表
 let baseTable = null;        // 当前基础表版本信息
 let attachmentFiles = [];    // 附件不进草稿：File 对象存不进 JSON
@@ -659,6 +676,11 @@ async function openForm(category, { keepDraft = false } = {}) {
   // 草稿存在 Task 9 之前不带 asset_conditions——续填这种旧草稿时补一个空对象，
   // 不然 renderFactors() 读 currentProject.asset_conditions[名称] 会当场报错。
   if (!currentProject.asset_conditions) currentProject.asset_conditions = {};
+  // 系数偏离不进草稿（同权重的做法一致，见 lastCompute/weights 相关注释）——
+  // 每次打开表单（新建/导入/续填）都是另一份报告的开始，覆盖须清空重来，
+  // 唯一入口在这里，三条路径（newBtn/xlsx/续填）都会经过 openForm。
+  coefficientOverrides = {};
+  if ($('coefReason')) $('coefReason').value = '';
   priceUnit = category === '农用' ? '元/亩·年' : '元/㎡·天';
   areaUnit = category === '农用' ? '亩' : '㎡';
   if (!keepDraft) draftId = null;
@@ -912,12 +934,31 @@ function factorSelect(f, picked) {
   </select>`;
 }
 
+/**
+ * 系数输入——三组因素与「未分组」因素共用。默认基础表原值，改了才进
+ * coefficientOverrides（见 syncCoefficientOverride）。`调整范围` 空串时不给提示，
+ * 与后端 parse_range 对畸形/空文本一律跳过的口径一致。
+ */
+function coefficientControl(f) {
+  const base = f.系数;
+  const current = Object.prototype.hasOwnProperty.call(coefficientOverrides, f.名称)
+    ? coefficientOverrides[f.名称] : base;
+  const changed = current !== base;
+  return `<div class="coefCtl">
+    <span class="coefLabel">每差1档修正系数</span>
+    <input type="text" inputmode="decimal" class="coefInput${changed ? ' changed' : ''}"
+           data-coef="${esc(f.名称)}" data-base="${base}" value="${esc(String(current))}">
+    ${f.调整范围 ? `<span class="rangeHint">调整范围 ${esc(f.调整范围)}</span>` : ''}
+  </div>`;
+}
+
 /** 有分组的因素：描述 textarea 在前，档次 select 在后。 */
 function factorRow(f, i) {
   const picked = subjectLevels[f.名称] || '';
   const desc = currentProject.asset_conditions[f.名称] || '';
   return `<div class="factor${picked ? '' : ' unset'}" data-factor="${i}">
-    <label><span>${esc(f.名称)}</span><span class="coef">每差1档 ${f.系数}</span></label>
+    <label><span>${esc(f.名称)}</span></label>
+    ${coefficientControl(f)}
     <textarea data-desc="${esc(f.名称)}" placeholder="据实手写，作为选档次的依据">${esc(desc)}</textarea>
     ${factorSelect(f, picked)}
   </div>`;
@@ -929,12 +970,13 @@ function factorRow(f, i) {
  * 因素在基础表里没能对上实勘表的分组前缀时，后端 `_asset_condition_groups_from_form`
  * 不把它归进任何组（避免臆造归属），提交的描述会被静默丢弃——若这里仍给它一个
  * textarea，等于给估价师一个填了也不进报告的假入口。故未分组因素退回 Task 9
- * 之前的样子：只选档次，不采集描述。
+ * 之前的样子：只选档次，不采集描述。系数覆盖与分组无关，两条路径都给。
  */
 function factorRowPlain(f, i) {
   const picked = subjectLevels[f.名称] || '';
   return `<div class="factor${picked ? '' : ' unset'}" data-factor="${i}">
-    <label><span>${esc(f.名称)}</span><span class="coef">每差1档 ${f.系数}</span></label>
+    <label><span>${esc(f.名称)}</span></label>
+    ${coefficientControl(f)}
     ${factorSelect(f, picked)}
   </div>`;
 }
@@ -972,10 +1014,41 @@ $('factors').addEventListener('change', (event) => {
 
 $('factors').addEventListener('input', (event) => {
   const el = event.target;
-  if (!el.dataset || !el.dataset.desc) return;
-  currentProject.asset_conditions[el.dataset.desc] = el.value;
-  scheduleDraftSave();
+  if (!el.dataset) return;
+  if (el.dataset.desc) {
+    currentProject.asset_conditions[el.dataset.desc] = el.value;
+    scheduleDraftSave();
+    return;
+  }
+  if (el.dataset.coef) {
+    syncCoefficientOverride(el);
+    scheduleDraftSave();
+  }
 });
+
+const COEF_TOLERANCE = 1e-9; // 浮点比较容差，避免 "1.0" 重打一遍被误判成改过
+
+/**
+ * 系数输入变了：与基础值比对，等于（容差内）就当没改，删出 coefficientOverrides
+ * （偏离只记真改动，见类头注释）；空白或非数字同样视为「未覆盖」，退回基础值，
+ * 不阻断——自由覆盖模式不设校验门槛，越界与否留给 check_coefficient_overrides
+ * 的软提示去说。改动会让之前算出的结果过期，与选实例变化的处理一致。
+ */
+function syncCoefficientOverride(input) {
+  const name = input.dataset.coef;
+  const base = Number(input.dataset.base);
+  const raw = input.value.trim();
+  const value = raw === '' ? NaN : Number(raw);
+  const overridden = Number.isFinite(value) && Math.abs(value - base) > COEF_TOLERANCE;
+  if (overridden) {
+    coefficientOverrides[name] = value;
+  } else {
+    delete coefficientOverrides[name];
+  }
+  input.classList.toggle('changed', overridden);
+  $('computeError').hidden = true;
+  $('computeResult').hidden = true;
+}
 
 // ── 伍 选实例与重算 ───────────────────────────────────────
 
@@ -1128,6 +1201,13 @@ async function applyComputed(result) {
     // 台账要记「当时实际用的那组权重」，不是「今天的默认」——见后端
     // _build_ledger_entry 的同名注释。这里能跑到，前面的重算必已用合法权重。
     weights: weightState().nums,
+    // 单份系数偏离随台账一起记：与 /api/compute 同一份 coefficientOverrides，
+    // 只在真有覆盖时才带 coefficient_overrides/偏离理由——没有覆盖时字段全不带，
+    // _apply_ledger_coefficient_overrides 判空即原样返回基础知识、偏离=()。
+    ...(Object.keys(coefficientOverrides).length ? {
+      coefficient_overrides: { ...coefficientOverrides },
+      偏离理由: ($('coefReason')?.value || '').trim(),
+    } : {}),
     result: {
       比准价格: result.比准价格,
       评估结果: result.评估结果,
@@ -1176,6 +1256,9 @@ $('computeBtn').addEventListener('click', async () => {
         // 选满 3 条且权重合法才带上；选不满时不送，让后端就着 selected
         // 给出「须选满 3 条实例」这个更准确的错误，而不是权重数量不对。
         ...(w.ok ? { weights: w.nums } : {}),
+        // 单份系数偏离：只送真改过的因素，未改的须维持基础表原系数不变
+        // （_parse_coefficient_overrides 缺省即空覆盖，字节级等同旧行为）。
+        ...(Object.keys(coefficientOverrides).length ? { coefficient_overrides: { ...coefficientOverrides } } : {}),
       }),
     });
     const body = await response.json();
