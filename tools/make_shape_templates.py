@@ -12,6 +12,7 @@ office.docx→lease_building.docx（房产 shape）、farmland.docx→lease_land
 """
 
 import shutil
+import zipfile
 from pathlib import Path
 
 from docx import Document
@@ -63,13 +64,31 @@ def _replace_everywhere(doc: DocumentType, mapping: dict[str, str]) -> None:
                     _fix_paragraph(paragraph, mapping)
 
 
+def _restore_styles(src: Path, dst: Path) -> None:
+    """把源模板的 word/styles.xml 原样塞回派生模板。
+
+    python-docx 保存时会重排 styles.xml 的字节（内容等价、字节不同），使
+    `test_templates_share_styles` 的「全模板共用同一样式表」摔掉。派生只改了
+    正文文字、没加新样式，故把源的 styles.xml 原样覆盖回去，样式字节保持一致。
+    """
+    styles = zipfile.Path(src, "word/styles.xml").read_bytes()
+    tmp = dst.with_suffix(".tmp.docx")
+    with zipfile.ZipFile(dst) as zin, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = styles if item.filename == "word/styles.xml" else zin.read(item.filename)
+            zout.writestr(item, data)
+    tmp.replace(dst)
+
+
 def build(src_name: str, dst_name: str, mapping: dict[str, str]) -> None:
+    src = TEMPLATES / src_name
     dst = TEMPLATES / dst_name
-    shutil.copy(TEMPLATES / src_name, dst)
+    shutil.copy(src, dst)
     doc = Document(str(dst))
     _replace_everywhere(doc, mapping)
     doc.add_paragraph(REVIEW_NOTICE)
     doc.save(str(dst))
+    _restore_styles(src, dst)
     print(f"wrote {dst}")
 
 

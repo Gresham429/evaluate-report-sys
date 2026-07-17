@@ -54,8 +54,14 @@ def test_scale_matches_in_all_three_goldens() -> None:
 
     农用/办公写合计，商业逐对象列（60、70，合计 130 从没写出来）。
     一个总在喊狼来了的提示，比没有提示更糟。
+
+    只覆盖三份有签发报告的金样：新四类是对方给的构造样例，规模文字与一览表本就
+    不自洽（如住宅规模写 1342.59㎡、一览表 342.59），SCALE_MISMATCH 是**正确的
+    提示**（校验只提示不阻断），不该在这里当误报断。新类别不炸校验器由
+    test_all_real_cases_produce_no_blocking_error 兜。
     """
-    for case, path in CASES.items():
+    for case in ("农用", "办公", "商业"):
+        path = CASES[case]
         codes = {w.code for w in validate(load_project(path), path)}
         assert "SCALE_MISMATCH" not in codes, f"{case} 被误报"
 
