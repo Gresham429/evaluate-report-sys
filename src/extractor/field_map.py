@@ -60,6 +60,10 @@ _TITLE_PREFIX: dict[str, Category] = {
     "农用地": Category.AGRICULTURAL,
     "办公": Category.OFFICE,
     "商业": Category.COMMERCIAL,
+    "住宅": Category.RESIDENTIAL,
+    "工业": Category.INDUSTRIAL,
+    "停车场": Category.PARKING_LAND,  # A1 标题前缀是「停车场」，类别值是「停车场用地」
+    "建设用地": Category.CONSTRUCTION_LAND,
 }
 
 
