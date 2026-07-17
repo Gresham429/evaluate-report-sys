@@ -156,3 +156,27 @@ def test_ledger_failure_does_not_break_report_generation(client: TestClient) -> 
         "ledger": json.dumps(bad, ensure_ascii=False),
     })
     assert response.status_code == 200, "台账记不上却把报告也搞挂了"
+
+
+def test_invalid_weights_length_does_not_break_report_generation(client: TestClient) -> None:
+    """权重数量不对时，台账记不上但报告照常生成。"""
+    bad = _ledger_payload(client)
+    bad["weights"] = [0.5, 0.5]  # 只有 2 个，但实例有 3 个
+    project = _project(client)
+    response = client.post("/api/render", data={
+        "project": json.dumps(project, ensure_ascii=False),
+        "ledger": json.dumps(bad, ensure_ascii=False),
+    })
+    assert response.status_code == 200, "权重验证失败不该让报告生成失败"
+
+
+def test_invalid_weights_sum_does_not_break_report_generation(client: TestClient) -> None:
+    """权重和不等于 1 时，台账记不上但报告照常生成。"""
+    bad = _ledger_payload(client)
+    bad["weights"] = [0.3, 0.3, 0.3]  # 和为 0.9，不等于 1
+    project = _project(client)
+    response = client.post("/api/render", data={
+        "project": json.dumps(project, ensure_ascii=False),
+        "ledger": json.dumps(bad, ensure_ascii=False),
+    })
+    assert response.status_code == 200, "权重验证失败不该让报告生成失败"

@@ -271,6 +271,34 @@ def _asset_conditions_to_ledger(
     )
 
 
+def _validate_weights(weights: object, num_instances: int) -> None:
+    """验证台账权重的有效性。
+
+    权重必须是浮点数序列，长度与实例数一致，和为 1（容差 1e-6）。
+    缺失或为空时使用默认权重，无须验证。
+
+    Args:
+        weights: 来自 raw["weights"] 的权重值
+        num_instances: 实际实例数（uses 列表长度）
+
+    Raises:
+        ValueError: 权重数量不对、非数字，或总和偏离 1。
+    """
+    if weights is None:
+        return
+    if not isinstance(weights, list):
+        raise ValueError(f"台账权重非法：须为数字列表，实收：{weights!r}")
+    if len(weights) != num_instances:
+        raise ValueError(f"台账权重非法：需 {num_instances} 个，实收 {len(weights)} 个")
+    try:
+        weight_floats = tuple(float(w) for w in weights)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"台账权重非法：包含非数字：{weights!r}") from exc
+    total = sum(weight_floats)
+    if abs(total - 1.0) > _WEIGHT_SUM_TOLERANCE:
+        raise ValueError(f"台账权重非法：和需为 1，实收 {total}")
+
+
 def _build_ledger_entry(project: Project, raw: dict[str, Any] | None) -> LedgerEntry:
     """按一次生成攒出台账记录。
 
@@ -327,6 +355,14 @@ def _build_ledger_entry(project: Project, raw: dict[str, Any] | None) -> LedgerE
         )
 
     result_raw = dict(raw["result"])
+    # 验证并构建权重
+    raw_weights = raw.get("weights")
+    _validate_weights(raw_weights, len(uses))
+    weights = (
+        tuple(float(w) for w in raw_weights)
+        if raw_weights is not None
+        else default_weights()
+    )
     return LedgerEntry.new(
         报告编号=project.report_no,
         类别=category,
@@ -344,7 +380,7 @@ def _build_ledger_entry(project: Project, raw: dict[str, Any] | None) -> LedgerE
         # 开放可调，用户填了非默认权重算出报告，台账却记着 ⅓⅓⅓，重放会用错
         # 权重、悄悄算出另一个数，还看不出错在哪。`raw.get("weights")` 缺失
         # （老 payload，前端还没送这个字段）或为空，才退回默认——向后兼容。
-        权重=tuple(float(w) for w in raw["weights"]) if raw.get("weights") else default_weights(),
+        权重=weights,
         结果=Result(
             比准价格=tuple(float(p) for p in result_raw["比准价格"]),
             评估结果=float(result_raw["评估结果"]),
