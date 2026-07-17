@@ -57,6 +57,7 @@ from src.library.model import StoredInstance, make_id, parse_lease_start
 from src.library.store import DEFAULT_STORE_PATH, InstanceStore
 from src.model import Category, ConditionFactor, ConditionGroup, Project, Subject
 from src.prose.composer import area_unit, price_unit
+from src.renderer.agreement import render_agreement
 from src.renderer.render import render
 from src.validator.checks import check_coefficient_overrides, check_dispersion, validate
 
@@ -1044,6 +1045,40 @@ def create_app() -> FastAPI:
             logger.exception("台账记录失败，报告照常生成：%s", parsed.report_no)
 
         logger.info("生成报告：%s", output.name)
+        return FileResponse(
+            output,
+            media_type=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ),
+            filename=output.name,
+            background=BackgroundTask(shutil.rmtree, workdir, ignore_errors=True),
+        )
+
+    @app.post("/api/agreement")
+    async def render_agreement_endpoint(
+        project: str = Form(...),
+        fee_total: int = Form(...),
+    ) -> FileResponse:
+        """生成委托评估协议书。与 /api/render 同一份 project 数据、收费手填。
+
+        协议书不进台账（无估价算术），只当场渲染返回。
+        """
+        try:
+            parsed = _project_from_payload(json.loads(project))
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=f"项目数据解析失败：{exc}") from exc
+        if fee_total < 0:
+            raise HTTPException(status_code=400, detail="收费合计不能为负")
+
+        workdir = Path(tempfile.mkdtemp(prefix="guijia_xy_"))
+        try:
+            output = workdir / f"{_safe_filename(parsed.report_no)}_委托评估协议书.docx"
+            render_agreement(parsed, fee_total, output)
+        except (ValueError, FileNotFoundError) as exc:
+            shutil.rmtree(workdir, ignore_errors=True)
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        logger.info("生成委托评估协议书：%s", output.name)
         return FileResponse(
             output,
             media_type=(
