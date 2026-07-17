@@ -40,6 +40,7 @@ def _grouped_direct(case: str) -> Knowledge:
                 levels=f.levels,
                 coefficient=f.coefficient,
                 group=group_of.get(f.name, ""),
+                调整范围=f.调整范围,
             )
             for f in knowledge.factors
         ),

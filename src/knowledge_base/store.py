@@ -98,6 +98,7 @@ class BaseTableStore:
                     levels=f.levels,
                     coefficient=f.coefficient,
                     group=group_of.get(f.name, ""),
+                    调整范围=f.调整范围,
                 )
                 for f in knowledge.factors
             ),
@@ -230,6 +231,7 @@ class BaseTableStore:
                     "档次": factor.levels,
                     "系数": factor.coefficient,
                     "分组": factor.group,
+                    "调整范围": factor.调整范围,
                 }
                 for factor in knowledge.factors
             ],
@@ -261,6 +263,7 @@ class BaseTableStore:
                     levels={str(k): int(v) for k, v in dict(f["档次"]).items()},
                     coefficient=float(f["系数"]),
                     group=str(f.get("分组", "")),
+                    调整范围=str(f.get("调整范围", "")),
                 )
                 for f in factors
             ),
