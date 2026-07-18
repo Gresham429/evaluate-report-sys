@@ -25,6 +25,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from starlette.background import BackgroundTask
 
+from src.dingtalk import config
 from src.attachments.collector import AttachmentPage, collect
 from src.drafts.model import Draft
 from src.drafts.store import DEFAULT_DRAFT_DIR, DraftStore
@@ -491,6 +492,19 @@ def create_app() -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
         return HTMLResponse((_STATIC / "index.html").read_text(encoding="utf-8"))
+
+    @app.get("/api/online")
+    def online_status() -> dict[str, object]:
+        """探当前是否联多维表。前端点「出报告」前先问它决定走哪支（§5）。
+
+        local 模式（承载后端≠多维表）：恒离线、恒走本地渲染，不进待同步流程。
+        notable 模式：短超时探一次，成功＝在线可领号，失败/缺凭据＝离线转待同步。
+        """
+        if not config.use_notable():
+            return {"online": False, "mode": "local"}
+        client = config.build_client(timeout=5.0)
+        online = client is not None and client.online()
+        return {"online": online, "mode": "notable"}
 
     @app.get("/api/instances")
     def list_instances(category: str) -> dict[str, object]:
