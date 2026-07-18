@@ -763,6 +763,7 @@ def create_app() -> FastAPI:
                     "报告编号": i.报告编号,
                     "类别": i.类别,
                     "更新时间": i.更新时间.isoformat(),
+                    "待同步": i.待同步,
                 }
                 for i in infos
             ]
@@ -781,8 +782,9 @@ def create_app() -> FastAPI:
         draft_id = payload.get("id")
         if draft_id is not None and not isinstance(draft_id, str):
             raise HTTPException(status_code=400, detail="id 须为字符串")
+        待同步 = bool(payload.get("待同步", False))
         try:
-            saved = DraftStore(_draft_dir()).save(Draft.new(raw, draft_id=draft_id))
+            saved = DraftStore(_draft_dir()).save(Draft.new(raw, draft_id=draft_id, 待同步=待同步))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"id": saved}
