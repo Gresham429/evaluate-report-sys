@@ -193,3 +193,8 @@ class NotableClient:
                 self.create_field(sheet, name, field_type)
                 created.append(name)
         return created
+
+    def delete_field(self, sheet: str, field_id: str) -> None:
+        """删一个字段（按字段 id）。主键/首列可能删不掉，调用方自行容错。"""
+        url = f"{_BASE}/v1.0/notable/bases/{self._base_id}/sheets/{sheet}/fields/{urllib.parse.quote(field_id)}"
+        self._authed("DELETE", f"{url}?operatorId={urllib.parse.quote(self._operator_id)}", None)

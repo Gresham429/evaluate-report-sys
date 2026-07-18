@@ -177,6 +177,20 @@ def test_create_sheet_returns_response() -> None:
     assert client.create_sheet("实例库")["id"] == "S2"
 
 
+def test_delete_field_issues_delete() -> None:
+    deleted: list[str] = []
+
+    def handler(method: str, path: str, body: Any) -> tuple[int, str]:
+        if method == "DELETE" and path.endswith("/fields/f1"):
+            deleted.append("f1")
+            return 200, "{}"
+        return 404, "{}"
+
+    client = NotableClient("ak", "as", base_id="b", operator_id="o", transport=_token_or(handler))
+    client.delete_field("s", "f1")
+    assert deleted == ["f1"]
+
+
 def test_ensure_fields_creates_only_missing() -> None:
     created: list[str] = []
 
