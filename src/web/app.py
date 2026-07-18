@@ -17,7 +17,8 @@ import logging
 import os
 import shutil
 import tempfile
-from dataclasses import asdict
+from dataclasses import asdict, replace
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,8 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from starlette.background import BackgroundTask
 
+from src.dingtalk import config
+from src.dingtalk.report_number import draw_report_number
 from src.attachments.collector import AttachmentPage, collect
 from src.drafts.model import Draft
 from src.drafts.store import DEFAULT_DRAFT_DIR, DraftStore
@@ -492,6 +495,19 @@ def create_app() -> FastAPI:
     def index() -> HTMLResponse:
         return HTMLResponse((_STATIC / "index.html").read_text(encoding="utf-8"))
 
+    @app.get("/api/online")
+    def online_status() -> dict[str, object]:
+        """探当前是否联多维表。前端点「出报告」前先问它决定走哪支（§5）。
+
+        local 模式（承载后端≠多维表）：恒离线、恒走本地渲染，不进待同步流程。
+        notable 模式：短超时探一次，成功＝在线可领号，失败/缺凭据＝离线转待同步。
+        """
+        if not config.use_notable():
+            return {"online": False, "mode": "local"}
+        client = config.build_client(timeout=5.0)
+        online = client is not None and client.online()
+        return {"online": online, "mode": "notable"}
+
     @app.get("/api/instances")
     def list_instances(category: str) -> dict[str, object]:
         """按类别列出实例，起始日从新到旧。
@@ -763,6 +779,7 @@ def create_app() -> FastAPI:
                     "报告编号": i.报告编号,
                     "类别": i.类别,
                     "更新时间": i.更新时间.isoformat(),
+                    "待同步": i.待同步,
                 }
                 for i in infos
             ]
@@ -781,8 +798,9 @@ def create_app() -> FastAPI:
         draft_id = payload.get("id")
         if draft_id is not None and not isinstance(draft_id, str):
             raise HTTPException(status_code=400, detail="id 须为字符串")
+        待同步 = bool(payload.get("待同步", False))
         try:
-            saved = DraftStore(_draft_dir()).save(Draft.new(raw, draft_id=draft_id))
+            saved = DraftStore(_draft_dir()).save(Draft.new(raw, draft_id=draft_id, 待同步=待同步))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"id": saved}
@@ -1010,6 +1028,28 @@ def create_app() -> FastAPI:
             parsed = _project_from_payload(json.loads(project))
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=f"项目数据解析失败：{exc}") from exc
+
+        # —— 多维表在线：领全公司唯一号，替换掉表单里的编号（§6 决策 A）——
+        # 本地模式（承载后端≠多维表）此段跳过，report_no 沿用表单手填值，行为不变。
+        if config.use_notable():
+            notable = config.build_client()
+            if notable is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="承载后端=多维表 但缺凭据，无法领号；请存为待同步草稿，配好凭据后同步。",
+                )
+            try:
+                编号 = draw_report_number(
+                    notable, config.ledger_sheet(), year=datetime.now().year
+                )
+            except Exception as exc:  # noqa: BLE001  离线/领号失败一律转 503，让前端存待同步
+                logger.warning("领号失败，转 503：%s", exc)
+                raise HTTPException(
+                    status_code=503,
+                    detail="当前离线或领号失败，请存为待同步草稿，联网后到草稿列表定稿。",
+                ) from exc
+            parsed = replace(parsed, report_no=编号)
+            logger.info("已领报告编号：%s", 编号)
 
         workdir = Path(tempfile.mkdtemp(prefix="guijia_"))
         attachment_paths: list[Path] = []

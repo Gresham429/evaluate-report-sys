@@ -53,7 +53,7 @@ def test_list_omits_the_form_data(client: TestClient) -> None:
     client.post("/api/drafts", json={"数据": _form_data()})
     row = client.get("/api/drafts").json()["drafts"][0]
     assert "数据" not in row
-    assert set(row) == {"id", "报告编号", "类别", "更新时间"}
+    assert set(row) == {"id", "报告编号", "类别", "更新时间", "待同步"}
 
 
 def test_half_filled_draft_without_report_no(client: TestClient) -> None:
@@ -88,3 +88,14 @@ def test_bad_payload_is_400(client: TestClient) -> None:
 def test_path_traversal_id_rejected(client: TestClient) -> None:
     """id 从请求里原样进来，不许被拿去读写草稿目录之外的文件。"""
     assert client.get("/api/drafts/..%2F..%2Fetc%2Fpasswd").status_code in (400, 404)
+
+
+def test_save_and_list_carry_待同步(client: TestClient) -> None:
+    client.post("/api/drafts", json={"数据": _form_data(), "待同步": True})
+    row = client.get("/api/drafts").json()["drafts"][0]
+    assert row["待同步"] is True
+
+
+def test_待同步_defaults_false_when_omitted(client: TestClient) -> None:
+    client.post("/api/drafts", json={"数据": _form_data()})
+    assert client.get("/api/drafts").json()["drafts"][0]["待同步"] is False

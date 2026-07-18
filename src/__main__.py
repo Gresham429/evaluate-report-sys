@@ -66,8 +66,28 @@ def _setup_logging() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
 
+def _load_dotenv() -> None:
+    """把 exe/仓库根旁的 .env 灌进环境变量（钉钉凭据、承载后端开关）。
+
+    只在真运行入口调，**不进 create_app()**：测试走 create_app()，一旦在那 load
+    就会把真凭据带进单测、去打真钉钉（config.py 的注释也是这个立场）。
+    setdefault 语义：命令行/CI 已显式设的变量优先，.env 只补缺。
+    """
+    env_file = app_dir() / ".env"
+    if not env_file.exists():
+        return
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip())
+    logger.info("已加载 .env：%s", env_file)
+
+
 def main() -> None:
     _setup_logging()
+    _load_dotenv()
     url = f"http://{HOST}:{PORT}/"
     logger.info("启动 %s", url)
     threading.Timer(1.0, lambda: webbrowser.open(url)).start()

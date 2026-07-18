@@ -206,3 +206,37 @@ def test_ensure_fields_creates_only_missing() -> None:
     new = client.ensure_fields("s", {"标题": "text", "快照": "text"})
     assert new == ["快照"]
     assert created == ["快照"]
+
+
+def test_online_true_when_list_sheets_succeeds() -> None:
+    def ok_transport(method: str, url: str, headers: dict[str, str], body: bytes | None):
+        if url.split("?", 1)[0] == TOKEN_URL:
+            return 200, json.dumps({"accessToken": "t", "expireIn": 7200})
+        return 200, json.dumps({"value": [{"id": "s1", "name": "台账"}]})
+    c = NotableClient("ak", "as", base_id="b", operator_id="o", transport=ok_transport)
+    assert c.online() is True
+
+
+def test_online_false_when_transport_errors() -> None:
+    def down_transport(method: str, url: str, headers: dict[str, str], body: bytes | None):
+        if url.split("?", 1)[0] == TOKEN_URL:
+            return 200, json.dumps({"accessToken": "t", "expireIn": 7200})
+        return 0, "网络错误：timed out"  # 非 200 → _authed 抛 RuntimeError
+    c = NotableClient("ak", "as", base_id="b", operator_id="o", transport=down_transport)
+    assert c.online() is False
+
+
+def test_online_false_on_malformed_200_response() -> None:
+    """回归测试：HTTP 200 但响应体畸形（JSON 数组而非对象）不应崩溃 online()。"""
+    def weird_transport(method: str, url: str, headers: dict[str, str], body: bytes | None):
+        if url.split("?", 1)[0] == TOKEN_URL:
+            return 200, json.dumps({"accessToken": "t", "expireIn": 7200})
+        # 返回 HTTP 200 但体是 JSON 数组，不是对象 → list_sheets 会在其上 .get() → AttributeError
+        return 200, "[]"
+    c = NotableClient("ak", "as", base_id="b", operator_id="o", transport=weird_transport)
+    assert c.online() is False  # 必须返回 False，不能抛异常
+
+
+def test_client_accepts_timeout_param() -> None:
+    c = NotableClient("ak", "as", base_id="b", operator_id="o", timeout=5.0)
+    assert c._timeout == 5.0

@@ -26,15 +26,21 @@ def use_notable() -> bool:
     return os.environ.get(_SWITCH, "").strip() == _SWITCH_ON
 
 
-def build_client() -> NotableClient | None:
-    """按 env 里的凭据 + baseId + operatorId 造客户端；缺任一返回 None。"""
+def build_client(*, timeout: float = 30.0) -> NotableClient | None:
+    """按 env 里的凭据 + baseId + operatorId 造客户端；缺任一返回 None。
+
+    timeout: 传给 NotableClient 的 HTTP 超时。在线探测用短超时（5s），
+    常规读写用默认 30s。
+    """
     app_key = os.environ.get("YIDA_APP_KEY", "").strip()
     app_secret = os.environ.get("YIDA_APP_SECRET", "").strip()
     base_id = os.environ.get("NOTABLE_BASE_ID", "").strip()
     operator_id = os.environ.get("NOTABLE_OPERATOR_ID", "").strip()
     if not (app_key and app_secret and base_id and operator_id):
         return None
-    return NotableClient(app_key, app_secret, base_id=base_id, operator_id=operator_id)
+    return NotableClient(
+        app_key, app_secret, base_id=base_id, operator_id=operator_id, timeout=timeout
+    )
 
 
 def ledger_sheet() -> str:

@@ -419,6 +419,10 @@
             <input id="fee-total" type="number" min="0" step="1" value="2616" style="width:8em">
           </label>
         </div>
+        <p class="hint" id="online-bar">
+          <button type="button" id="refresh-online" class="mini">刷新在线状态</button>
+          <span id="online-tag"></span>
+        </p>
         <div class="actions">
           <button id="generate" class="primary">下载估价报告</button>
           <button id="generate-agreement">下载委托评估协议书</button>
@@ -646,15 +650,21 @@ async function loadDraftList() {
       // 正在编辑的这条：标「编辑中」，不给「续填」「×」——你已经在它里面了，
       // 续填自己没意义（还可能盖掉刚填的），删自己更不该。
       const editing = d.id === draftId;
+      // 待同步草稿：离线出报告存下的记录，联网后靠「同步定稿」补领号出正式文书。
+      const pending = d.待同步;
+      const canSync = onlineState.mode !== 'local' && onlineState.online;
       return `
       <li>
         <span class="name">${esc(d.报告编号 || '（未填报告编号）')}
           <span class="chip">${esc(d.类别 || '?')}</span>
+          ${pending ? '<span class="chip chip-no">⏳待同步</span>' : ''}
           ${editing ? '<span class="chip chip-seal">编辑中</span>' : ''}
         </span>
         <span class="ver">${esc(d.更新时间.slice(0, 16).replace('T', ' '))}</span>
-        ${editing ? '' : `<button type="button" class="mini" data-draft="${esc(d.id)}">续填</button>
-        <button type="button" class="mini" data-drop="${esc(d.id)}">×</button>`}
+        ${pending ? `<button type="button" class="mini" data-sync="${esc(d.id)}" ${canSync ? '' : 'disabled title="离线，联网后可同步"'}>同步定稿</button>
+        <button type="button" class="mini" data-drop="${esc(d.id)}">删除</button>`
+        : (editing ? '' : `<button type="button" class="mini" data-draft="${esc(d.id)}">续填</button>
+        <button type="button" class="mini" data-drop="${esc(d.id)}">×</button>`)}
       </li>`;
     }).join('')}</ul>`;
 }
@@ -676,6 +686,35 @@ $('draftList').addEventListener('click', async (event) => {
     // task-7-report.md 续填漏重置一节）。与 newBtn / xlsx 两处保持一致。
     lastCompute = null;
     await openForm(currentProject.category, { keepDraft: true });
+  } else if (t.dataset.sync) {
+    const state = await checkOnline();
+    if (!(state.mode !== 'local' && state.online)) {
+      alert('当前离线，无法同步定稿。请点「刷新在线状态」确认联网后再试。');
+      return;
+    }
+    const body = await (await fetch('/api/drafts/' + encodeURIComponent(t.dataset.sync))).json();
+    const proj = body.数据.project;
+    const form = new FormData();
+    form.append('project', JSON.stringify(proj));
+    if (body.数据.lastCompute) form.append('ledger', JSON.stringify(body.数据.lastCompute));
+    const resp = await fetch('/api/render', { method: 'POST', body: form });
+    if (!resp.ok) {
+      let detail = resp.statusText;
+      try { detail = (await resp.json()).detail; } catch (e) { /* 非 JSON */ }
+      alert('同步定稿失败：' + detail);
+      return;
+    }
+    // 触发下载（复用 downloadDoc 的取名+落盘逻辑走一遍）
+    const blob = await resp.blob();
+    const disposition = resp.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+    const filename = match ? decodeURIComponent(match[1]) : '估价报告.docx';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+    // 已成正式报告 → 删掉这份待同步草稿（决策 2：同步成功才删）
+    await fetch('/api/drafts/' + encodeURIComponent(t.dataset.sync), { method: 'DELETE' });
+    loadDraftList();
   } else if (t.dataset.drop) {
     await fetch('/api/drafts/' + encodeURIComponent(t.dataset.drop), { method: 'DELETE' });
     loadDraftList();
@@ -1406,17 +1445,77 @@ async function downloadDoc(url, form, fallbackName) {
   status.className = 'status done';
 }
 
+// 在线态探测：多维表承载模式下决定「出报告」是直接领号渲染，还是先存成
+// 待同步草稿。本地模式不联多维表，恒定按本地手填号出报告。
+let onlineState = { online: false, mode: 'local' };  // /api/online 的最近结果
+
+async function checkOnline() {
+  try {
+    const r = await fetch('/api/online');
+    onlineState = await r.json();
+  } catch (e) {
+    onlineState = { online: false, mode: 'notable' };  // 探不通即当离线
+  }
+  const tag = $('online-tag');
+  if (onlineState.mode === 'local') {
+    tag.textContent = '本地模式（不联多维表）';
+    tag.className = 'chip';
+  } else if (onlineState.online) {
+    tag.textContent = '● 在线（可领号出正式报告）';
+    tag.className = 'chip chip-seal';
+  } else {
+    tag.textContent = '○ 离线（出报告将存为待同步草稿）';
+    tag.className = 'chip chip-no';
+  }
+  loadDraftList();  // 在线态变了，[同步定稿] 的可点性要跟着刷新
+  return onlineState;
+}
+
+$('refresh-online').addEventListener('click', checkOnline);
+
+// 存待同步草稿：与 saveDraft 同形，只多带 待同步:true 与 lastCompute——
+// 联网后「同步定稿」要重放算术台账，没有 lastCompute 就只能出「未经系统
+// 重算」的报告（见 Step 4 处理里的兜底说明）。
+async function saveSyncDraft() {
+  const body = {
+    id: draftId,
+    待同步: true,
+    数据: {
+      报告编号: currentProject.report_no,
+      类别: currentProject.category,
+      project: currentProject,
+      subject_levels: subjectLevels,
+      priceOrigin,
+      lastCompute,
+    },
+  };
+  const r = await fetch('/api/drafts', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  if (r.ok) draftId = (await r.json()).id;
+  loadDraftList();
+}
+
 $('generate').addEventListener('click', async () => {
   if (!currentProject) return;
   const button = $('generate');
   button.disabled = true;
   $('generate-status').className = 'status';
   $('generate-status').textContent = '生成中……';
-  const form = new FormData();
-  form.append('project', JSON.stringify(currentProject));
-  if (lastCompute) form.append('ledger', JSON.stringify(lastCompute));
-  attachmentFiles.forEach((f) => form.append('files', f));
   try {
+    const state = await checkOnline();
+    // 多维表模式且离线：不渲染、不领号，存成待同步草稿（§3/§7）
+    if (state.mode === 'notable' && !state.online) {
+      await saveSyncDraft();
+      $('generate-status').textContent = '当前离线，已存为待同步草稿，联网后到上方草稿列表点「同步定稿」。';
+      $('generate-status').className = 'status done';
+      return;
+    }
+    // 本地模式 或 多维表在线：照常出报告（本地手填号 / 在线后端领号）
+    const form = new FormData();
+    form.append('project', JSON.stringify(currentProject));
+    if (lastCompute) form.append('ledger', JSON.stringify(lastCompute));
+    attachmentFiles.forEach((f) => form.append('files', f));
     await downloadDoc('/api/render', form, '估价报告.docx');
   } finally {
     button.disabled = false;
@@ -1823,4 +1922,5 @@ document.addEventListener('click', (event) => {
 
 // ── 启动 ──────────────────────────────────────────────────
 loadDraftList();
+checkOnline();
 </script>
