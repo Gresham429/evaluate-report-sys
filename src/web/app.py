@@ -17,7 +17,8 @@ import logging
 import os
 import shutil
 import tempfile
-from dataclasses import asdict
+from dataclasses import asdict, replace
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from starlette.background import BackgroundTask
 
 from src.dingtalk import config
+from src.dingtalk.report_number import draw_report_number
 from src.attachments.collector import AttachmentPage, collect
 from src.drafts.model import Draft
 from src.drafts.store import DEFAULT_DRAFT_DIR, DraftStore
@@ -1026,6 +1028,28 @@ def create_app() -> FastAPI:
             parsed = _project_from_payload(json.loads(project))
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=f"项目数据解析失败：{exc}") from exc
+
+        # —— 多维表在线：领全公司唯一号，替换掉表单里的编号（§6 决策 A）——
+        # 本地模式（承载后端≠多维表）此段跳过，report_no 沿用表单手填值，行为不变。
+        if config.use_notable():
+            notable = config.build_client()
+            if notable is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="承载后端=多维表 但缺凭据，无法领号；请存为待同步草稿，配好凭据后同步。",
+                )
+            try:
+                编号 = draw_report_number(
+                    notable, config.ledger_sheet(), year=datetime.now().year
+                )
+            except Exception as exc:  # noqa: BLE001  离线/领号失败一律转 503，让前端存待同步
+                logger.warning("领号失败，转 503：%s", exc)
+                raise HTTPException(
+                    status_code=503,
+                    detail="当前离线或领号失败，请存为待同步草稿，联网后到草稿列表定稿。",
+                ) from exc
+            parsed = replace(parsed, report_no=编号)
+            logger.info("已领报告编号：%s", 编号)
 
         workdir = Path(tempfile.mkdtemp(prefix="guijia_"))
         attachment_paths: list[Path] = []
