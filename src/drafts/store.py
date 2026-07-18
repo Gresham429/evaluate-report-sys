@@ -160,6 +160,7 @@ class DraftStore:
             "报告编号": draft.报告编号,
             "类别": draft.类别,
             "更新时间": draft.更新时间.isoformat(),
+            "待同步": draft.待同步,
             "数据": draft.数据,
         }
 
@@ -179,4 +180,5 @@ class DraftStore:
             类别=str(data.get("类别", "")),
             更新时间=datetime.fromisoformat(str(data["更新时间"])),
             数据=dict(data.get("数据", {})),  # type: ignore[call-overload]
+            待同步=bool(data.get("待同步", False)),
         )

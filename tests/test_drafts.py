@@ -173,3 +173,18 @@ def test_json_is_human_readable(tmp_path: Path) -> None:
     assert "兴耀科创城A幢09层" in text, "中文不得被转义成 \\uXXXX"
     assert "\n  " in text, "须缩进换行，不得压成一行"
     assert json.loads(text)["更新时间"] == _基准时刻.isoformat()
+
+
+def test_待同步_round_trips_through_store() -> None:
+    d = Draft.new({"报告编号": "", "类别": "办公"}, 待同步=True)
+    assert d.待同步 is True
+    assert d.info().待同步 is True
+    back = DraftStore.from_dict(DraftStore.to_dict(d))
+    assert back.待同步 is True
+
+
+def test_待同步_defaults_false_for_old_draft_without_field() -> None:
+    # 老草稿文件没有「待同步」键：缺省视为 False（普通草稿）。
+    payload = {"id": "abc123", "报告编号": "", "类别": "办公",
+               "更新时间": "2026-07-18T10:00:00", "数据": {}}
+    assert DraftStore.from_dict(payload).待同步 is False
