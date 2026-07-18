@@ -32,20 +32,22 @@ _CAPACITY_WARN = 18000  # 免费额度约 2 万行，到 90% 就告警
 Transport = Callable[[str, str, dict[str, str], bytes | None], tuple[int, str]]
 
 
-def _urllib_transport(
-    method: str, url: str, headers: dict[str, str], body: bytes | None
-) -> tuple[int, str]:
-    """默认真实 transport：只访问固定的钉钉域名。"""
-    req = urllib.request.Request(url, data=body, method=method)
-    for key, val in headers.items():
-        req.add_header(key, val)
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310  仅钉钉域名
-            return resp.status, resp.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:
-        return exc.code, exc.read().decode("utf-8", "replace")
-    except urllib.error.URLError as exc:
-        return 0, f"网络错误：{exc}"
+def _make_urllib_transport(timeout: float) -> Transport:
+    """按超时秒数生成真实 transport：只访问固定的钉钉域名。"""
+    def _transport(
+        method: str, url: str, headers: dict[str, str], body: bytes | None
+    ) -> tuple[int, str]:
+        req = urllib.request.Request(url, data=body, method=method)
+        for key, val in headers.items():
+            req.add_header(key, val)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310  仅钉钉域名
+                return resp.status, resp.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read().decode("utf-8", "replace")
+        except urllib.error.URLError as exc:
+            return 0, f"网络错误：{exc}"
+    return _transport
 
 
 class NotableClient:
@@ -60,12 +62,14 @@ class NotableClient:
         operator_id: str,
         transport: Transport | None = None,
         clock: Callable[[], float] = time.monotonic,
+        timeout: float = 30.0,
     ) -> None:
         self._app_key = app_key
         self._app_secret = app_secret
         self._base_id = base_id
         self._operator_id = operator_id
-        self._transport: Transport = transport or _urllib_transport
+        self._timeout = timeout
+        self._transport: Transport = transport or _make_urllib_transport(timeout)
         self._clock = clock
         self._token: str | None = None
         self._token_expiry: float = 0.0
@@ -167,6 +171,18 @@ class NotableClient:
     def create_sheet(self, name: str) -> dict[str, Any]:
         """建一张数据表，返回原始响应（含新表 id/sheetId，形状待校准）。"""
         return self._authed("POST", self._sheets_url(), {"name": name})
+
+    def online(self) -> bool:
+        """轻量在线探测：能列出数据表即在线。抛错/超时视为离线。
+
+        用于 /api/online：不改变任何数据，只探连通性。凡异常一律吞成 False——
+        离线的表现就是"探不通"，调用方不需要知道具体炸在哪。
+        """
+        try:
+            self.list_sheets()
+            return True
+        except (RuntimeError, OSError, ValueError):
+            return False
 
     # ------------------------------------------------------------ 字段（建表用）
 
