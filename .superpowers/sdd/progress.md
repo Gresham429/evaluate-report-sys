@@ -474,3 +474,17 @@ FE-1 #2c review (haiku): spec ✅ quality approved. Ledger-wiring CONFIRMED (coe
 Last: FE-2 = ⑤ instance 因素档次 (/api/instances +1 + expand render) + weight fraction input "1/3" + cleanup Deviation docstring.
 FE-2: done (commit aa6d7b1, 3 files: /api/instances+因素档次, index.html tiers-render+fraction-input, Deviation docstring). 440 green, ruff+mypy clean, server killed, no browser→static/API verify. Review pending (fraction-parse safety no-eval, 因素档次 additive, no regression).
 FE-2 review (haiku): spec ✅ quality approved. Fraction-parse SECURE (regex+Number, no eval, div-0 guarded). 因素档次 additive, docstring comment-only, no regression. 440 green. ALL follow-ups (#1/#2/#4/⑤/fraction) DONE+reviewed. ④ deferred (DingTalk).
+
+## ═══ 离线待同步 + 联网对账 + 统一发号 ═══
+计划：docs/superpowers/plans/2026-07-18-离线待同步与联网对账.md（8 任务）
+分支：feat/offline-sync（BASE 541af09）
+决策：A=编号显式存快照+复用领号(占位行/跳号,用户默认接受)｜B=三态只在多维表模式,本地=今天｜C=list_sheets+5s探测｜D=.env仅main()载入
+Pre-flight：Task6 前端按 §5 纪律无自动化测试、靠真机验收——非缺陷，审查时据实裁决不预判。
+Task 1: complete (commit b71f63b, 规格✅ 质量批准, 15/15 绿, ruff+mypy 审查者独立复核干净)
+  - ⚠️→已裁决: list_drafts 未含待同步 = Task 2 的活，非缺口
+  - Minor 留最终审查: store.from_dict 用 bool() 强转，手改文件写 "false" 字符串会解成 True（与既有 报告编号/类别 同款容错哲学，非新缺陷）
+Task 2: complete (commit 89e2f26, 规格✅ 质量批准, 11/11 绿, 纯附加3行, get_draft 未动)
+  - Minor 留最终审查: 未覆盖显式「待同步:False」入参(省略路径已验默认);bool()强转footgun(plan-mandated,同Task1)
+Task 3: 审查=需修复(1 Important, plan-mandated) — online() catch 太窄
+  裁决: 广化为 except Exception(honor 计划docstring「凡异常一律吞成 False」的本意，非与计划冲突)。
+  Minor 留最终审查: timeout 未端到端断言(仅 _timeout==5.0); 未留 _urllib_transport shim(0 外部引用,移除正确)

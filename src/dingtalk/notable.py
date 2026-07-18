@@ -181,7 +181,7 @@ class NotableClient:
         try:
             self.list_sheets()
             return True
-        except (RuntimeError, OSError, ValueError):
+        except Exception:  # noqa: BLE001  探测的契约就是「任何失败都算离线」——含畸形但 200 的响应(list 体/缺字段)引发的 AttributeError/KeyError/TypeError
             return False
 
     # ------------------------------------------------------------ 字段（建表用）
