@@ -9,7 +9,7 @@ from dataclasses import asdict
 from datetime import date
 from pathlib import Path
 
-from src.library.backend import InstanceBackend, LocalFileInstanceBackend
+from src.library.backend import InstanceBackend
 from src.library.model import DatePrecision, StoredInstance
 from src.paths import data_dir
 from src.model import Category
@@ -28,8 +28,13 @@ class InstanceStore:
         self, path: Path = DEFAULT_STORE_PATH, *, backend: InstanceBackend | None = None
     ) -> None:
         self.path = path  # 保留：既有调用点/测试仍读它
-        # 持久化委托给可插拔后端；默认本地文件后端 → 既有行为一字不变。
-        self._backend: InstanceBackend = backend or LocalFileInstanceBackend(path)
+        # 持久化委托给可插拔后端；默认后端由工厂按 env 选（未配置=本地文件，行为一字不变）。
+        # 工厂延迟到实例化时导入，避免 store→factory→store 的模块级循环导入。
+        if backend is None:
+            from src.dingtalk.factory import instance_backend_for
+
+            backend = instance_backend_for(path)
+        self._backend: InstanceBackend = backend
         self._items: dict[str, StoredInstance] = {}
 
     def load(self) -> None:
