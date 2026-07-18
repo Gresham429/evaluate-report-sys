@@ -27,7 +27,7 @@ from src.extractor.survey import extract_survey
 # 取别名：本模块的 load()/_version_path() 对外的形参就叫 fingerprint（指纹是版本号，
 # 这个名字对调用方最自然），裸导入同名函数会在函数体内被形参遮蔽——`fingerprint(k)`
 # 会变成 `'str' object is not callable`。
-from src.knowledge_base.backend import BaseTableBackend, LocalFileBaseTableBackend
+from src.knowledge_base.backend import BaseTableBackend
 from src.knowledge_base.fingerprint import fingerprint as compute_fingerprint
 from src.paths import data_dir
 from src.model import Category
@@ -70,8 +70,13 @@ class BaseTableStore:
         self, path: Path = DEFAULT_STORE_DIR, *, backend: BaseTableBackend | None = None
     ) -> None:
         self.path = path  # 保留：既有调用点/测试仍读它
-        # 持久化委托给可插拔后端；默认本地文件后端 → 既有行为一字不变。
-        self._backend: BaseTableBackend = backend or LocalFileBaseTableBackend(path)
+        # 持久化委托给可插拔后端；默认后端由工厂按 env 选（未配置=本地文件，行为一字不变）。
+        # 工厂延迟到实例化时导入，避免 store→factory→store 的模块级循环导入。
+        if backend is None:
+            from src.dingtalk.factory import base_table_backend_for
+
+            backend = base_table_backend_for(path)
+        self._backend: BaseTableBackend = backend
 
     # ------------------------------------------------------------ 对外
 
