@@ -488,3 +488,47 @@ Task 2: complete (commit 89e2f26, 规格✅ 质量批准, 11/11 绿, 纯附加3�
 Task 3: 审查=需修复(1 Important, plan-mandated) — online() catch 太窄
   裁决: 广化为 except Exception(honor 计划docstring「凡异常一律吞成 False」的本意，非与计划冲突)。
   Minor 留最终审查: timeout 未端到端断言(仅 _timeout==5.0); 未留 _urllib_transport shim(0 外部引用,移除正确)
+Task 3: complete (commits faa3d99..6ee8392, 修复后规格✅ 质量批准, 16/16 绿, mypy/ruff 干净)
+  - Important 已修: online() catch 广化 except Exception + 畸形200回归测试(RED→GREEN实证)
+  - Minor 留最终审查: noqa 注释单行长; swallow 无 logging(pre-fix已有); timeout 未端到端断言
+Task 4: in_progress
+Task 4: complete (commit f2b6f1f, 规格✅ 质量批准, 4/4 + 11/11 sanity, mypy/ruff 干净)
+  - ⚠️→已裁决: conftest 从不设 承载后端(仅设4个data-dir env),故本地模式默认成立、全suite安全
+  - Minor 留最终审查: config import 未按字母序插(ruff 未启 isort 故未拦); test_local 未用的 monkeypatch 形参
+Task 5: in_progress (标准模型 sonnet — 领号注入,最高风险)
+Task 5: DONE 实现 (commit 04b8569, 3/3 focused RED-first, 32/32 regression, 全量 541 绿, mypy/ruff 干净)
+  - 空 subjects 直接渲染成功，未用 brief 的最小subject回退
+  - FakeNotable 同实例服务 draw + LedgerStore 后端(经factory)，验得恰一条快照行+一条领号占位行(决策A)
+  - 待审查(重点铁律#4/#5: 本地不变/报告编号经replace注入/503兜底/replay不读报告编号)
+Task 5: complete (commit 04b8569, 铁律#4/#5 lens 规格✅ 质量批准, 541 绿)
+  - Minor 留最终审查: 领号 gate 只判 use_notable() 未并判 ledger_sheet()(漏配sheet→503文案误导,但fail-safe,plan-verbatim);
+    test_local 靠env未显式monkeypatch use_notable=False(brief verbatim)
+Task 6: in_progress (前端,sonnet;无自动化测试,真机验收=人工,§5纪律)
+Task 6: DONE 实现 (commit 068903a, +106/-6 index.html)
+  - sanity: 页面200serves, node --check JS语法过, refresh-online/online-tag/checkOnline/saveSyncDraft/data-sync 均在served HTML, /api/online 响应, pytest boots, Playwright冒烟无console错
+  - 真机六项清单=OUTSTANDING(人工,§5)
+  - 实现者concern: 载入时loadDraftList跑两次(无害,brief-literal); Playwright点击走evaluate(按钮在隐藏step内)
+  - 待审查(JS代码质量+规格; 无UI自动化测试=§5仓库既定,非缺陷)
+Task 6: complete (commit 068903a, 规格✅(六件齐) 质量批准, JS语法过, delete-only-on-success 早return实证守住, esc()转义齐)
+  - Minor 留最终审查: sync下载逻辑与downloadDoc重复(plan-mandated,可来日抽 downloadBlob 复用); 载入两次loadDraftList(无害); sync无双击守卫(与既有handler一致)
+  - ⚠️真机六项清单仍待人工验(§5)——交付前必做
+Task 7: in_progress
+Task 7: 审查=需修复(1 Important, plan-mandated, 实证) — test_load_dotenv_sets_missing_keys 泄漏 env
+  根因: monkeypatch.delenv(absent,raising=False)不登记undo + _load_dotenv 用 setdefault 绕过 monkeypatch
+        → 承载后端/NOTABLE_BASE_ID 留在 os.environ，全量跑时 17 failed(deselect该测试→0 failed)
+  裁决: 必修(破坏全绿铁律)。修法=setenv占位再delenv登记undo，两个key都改；必须跑全量确认0泄漏
+  Minor 留最终审查: test 内局部 import os(应移module顶); _load_dotenv 不strip引号/无export/read_text无异常兜(plan-inherited)
+Task 7: complete (commits e1ca381..617b191, 修复后规格✅ 质量批准, 全量544绿0失败, 泄漏机制级修复经pytest undo源码验证)
+  - Important 已修: setenv+delenv 登记 undo; import os 移module顶; 生产码__main__.py未动
+Task 8: in_progress (控制者亲自: 全量闸 + 文档)
+Task 8: complete — 全量闸绿: pytest 544 passed(exit0) + mypy 60文件干净 + ruff 干净; docs/README §1b + spec 状态更新已提交
+  8 任务全部完成。待: 整分支终审(opus) → 交付前真机点前端六项 → 并 main。
+
+## 整分支终审(opus, 4a457e1..1c72248, 11 commits)
+判定: **Ready to merge = Yes**(无代码改动阻塞)。Critical 0。
+Important-1: notable 模式下 append 失败→报告已出但无台账行+占位行留存(可疑领号 vs 出了没记账难分)。
+  = 继承既有「报告优先于台账」权衡,非本分支引入的回归; 缓解已在 app.py:1085 logger.exception 记下领得编号。follow-up 非阻塞。
+Minor(全部 acceptable-to-defer): bool强转/online无log/import序/领号gate只判use_notable(经查无split-brain,fail-safe)/sync下载重复
+  新观察: 协议书不发号(likely by design,engagement 时签)/committed .claude/logs(=仓库既有惯例,main已跟踪)
+硬闸: **前端真机六项清单=人工,交付/并main前必做**(§5)。
+终审建议加一项真机探针: draw 成功后强制 notable append 失败,验 Important-1 可容忍。
