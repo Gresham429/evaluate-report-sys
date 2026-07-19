@@ -15,6 +15,7 @@
 import json
 import logging
 import os
+import sys
 import shutil
 import tempfile
 from dataclasses import asdict, replace
@@ -541,6 +542,22 @@ def create_app() -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
         return HTMLResponse((_STATIC / "index.html").read_text(encoding="utf-8"))
+
+    @app.get("/api/_diag")
+    def _diag() -> dict[str, object]:
+        """临时诊断：暴露冻结产物的路径解析（查 Windows zip 冒烟草稿不落盘的真凶）。"""
+        from src.paths import app_dir, data_dir, is_frozen
+
+        return {
+            "frozen": is_frozen(),
+            "sys.executable": sys.executable,
+            "sys._MEIPASS": getattr(sys, "_MEIPASS", None),
+            "app_dir": str(app_dir()),
+            "data_dir": str(data_dir()),
+            "draft_dir": str(_draft_dir()),
+            "base_table_dir": str(_base_table_dir()),
+            "cwd": os.getcwd(),
+        }
 
     @app.get("/api/online")
     def online_status() -> dict[str, object]:

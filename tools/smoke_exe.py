@@ -90,8 +90,15 @@ def _check_draft_lands_beside_the_exe(app_dir: Path) -> None:
 
     drafts = list((app_dir / "data" / "草稿").glob("*.json"))
     if not drafts:
+        # 趁进程还活着（_MEIPASS 未删）问它自己把路径解析成了啥——直指真凶。
+        try:
+            with urllib.request.urlopen(BASE + "/api/_diag", timeout=5) as r:
+                diag = r.read().decode("utf-8")
+        except (urllib.error.URLError, OSError) as exc:
+            diag = f"(取 /api/_diag 失败：{exc})"
         raise SystemExit(
             f"✗ 草稿没落在产物旁边（找的是 {app_dir / 'data' / '草稿'}）。\n"
+            f"  应用自报路径：{diag}\n"
             f"  冻结后 Path(__file__) 指向退出即删的临时目录——数据每次关闭会清零。\n"
             f"  见 src/paths.py。"
         )
