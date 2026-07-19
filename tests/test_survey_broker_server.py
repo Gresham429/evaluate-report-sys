@@ -33,44 +33,58 @@ class FakeAmap:
         return {"address": "示例地址", "bus_stops": [], "nearest_metro": None, "facilities": []}
 
 
+class FakeIdentity:
+    def whoami(self, auth_code: str) -> dict[str, object]:
+        if auth_code == "good":
+            return {"userid": "u1", "name": "张三"}
+        raise ValueError("bad code")
+
+
 def test_handle_save_draft_ok() -> None:
     body = json.dumps(
         {"action": "saveDraft",
          "payload": {"filler": "张三", "category": "住宅", "updated_at": "t", "content": {}}}
     ).encode("utf-8")
-    status, out = handle(body, store=FakeStore(), amap=FakeAmap())
+    status, out = handle(body, store=FakeStore(), amap=FakeAmap(), identity=FakeIdentity())
     assert status == 200
     assert json.loads(out)["survey_id"]
 
 
 def test_handle_prefill_geo_ok() -> None:
     body = json.dumps({"action": "prefillGeo", "payload": {"lng": 120.0, "lat": 30.0}}).encode("utf-8")
-    status, out = handle(body, store=FakeStore(), amap=FakeAmap())
+    status, out = handle(body, store=FakeStore(), amap=FakeAmap(), identity=FakeIdentity())
     assert status == 200
     assert json.loads(out)["address"] == "示例地址"
 
 
+def test_handle_whoami_ok() -> None:
+    body = json.dumps({"action": "whoami", "payload": {"authCode": "good"}}).encode("utf-8")
+    status, out = handle(body, store=FakeStore(), amap=FakeAmap(), identity=FakeIdentity())
+    assert status == 200
+    assert json.loads(out)["userid"] == "u1"
+
+
 def test_handle_bad_json_returns_400() -> None:
-    status, out = handle(b"{ not json", store=FakeStore(), amap=FakeAmap())
+    status, out = handle(b"{ not json", store=FakeStore(), amap=FakeAmap(), identity=FakeIdentity())
     assert status == 400
     assert "error" in json.loads(out)
 
 
 def test_handle_non_object_body_returns_400() -> None:
-    status, out = handle(b"[1, 2]", store=FakeStore(), amap=FakeAmap())
+    status, out = handle(b"[1, 2]", store=FakeStore(), amap=FakeAmap(), identity=FakeIdentity())
     assert status == 400
     assert "error" in json.loads(out)
 
 
 def test_handle_unknown_action_returns_400() -> None:
     body = json.dumps({"action": "nope", "payload": {}}).encode("utf-8")
-    status, out = handle(body, store=FakeStore(), amap=FakeAmap())
+    status, out = handle(body, store=FakeStore(), amap=FakeAmap(), identity=FakeIdentity())
     assert status == 400
 
 
 def test_handle_submit_missing_returns_404() -> None:
     body = json.dumps({"action": "submit", "payload": {"survey_id": "ghost"}}).encode("utf-8")
-    status, out = handle(body, store=FakeStore(), amap=FakeAmap())
+    status, out = handle(body, store=FakeStore(), amap=FakeAmap(), identity=FakeIdentity())
     assert status == 404
 
 
@@ -87,6 +101,6 @@ def test_handle_downstream_exception_returns_500() -> None:
             raise RuntimeError("钉钉炸了")
 
     body = json.dumps({"action": "loadDraft", "payload": {"survey_id": "x"}}).encode("utf-8")
-    status, out = handle(body, store=BoomStore(), amap=FakeAmap())
+    status, out = handle(body, store=BoomStore(), amap=FakeAmap(), identity=FakeIdentity())
     assert status == 500
     assert "error" in json.loads(out)

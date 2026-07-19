@@ -18,7 +18,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from serverless.survey_broker.amap import AmapClient
-from serverless.survey_broker.handler import _Amap, _Store, dispatch
+from serverless.survey_broker.handler import _Amap, _Identity, _Store, dispatch
+from serverless.survey_broker.identity import DingtalkIdentity
 from serverless.survey_broker.store import SurveyBrokerStore
 from src.dingtalk.notable import NotableClient
 
@@ -27,8 +28,8 @@ logger = logging.getLogger(__name__)
 __all__ = ["build_context", "handle", "main"]
 
 
-def build_context() -> tuple[SurveyBrokerStore, AmapClient]:
-    """按环境变量建 store + amap（进程启动时调一次）。缺必需变量即 KeyError→进程起不来，属预期。"""
+def build_context() -> tuple[SurveyBrokerStore, AmapClient, DingtalkIdentity]:
+    """按环境变量建 store + amap + identity（进程启动时调一次）。缺必需变量即 KeyError→进程起不来，属预期。"""
     client = NotableClient(
         os.environ["DINGTALK_APP_KEY"],
         os.environ["DINGTALK_APP_SECRET"],
@@ -37,10 +38,13 @@ def build_context() -> tuple[SurveyBrokerStore, AmapClient]:
     )
     store = SurveyBrokerStore(client, os.environ["NOTABLE_SURVEY_SHEET"])
     amap = AmapClient(os.environ.get("AMAP_KEY", ""))
-    return store, amap
+    identity = DingtalkIdentity(client.access_token)
+    return store, amap, identity
 
 
-def handle(body_bytes: bytes, *, store: _Store, amap: _Amap) -> tuple[int, bytes]:
+def handle(
+    body_bytes: bytes, *, store: _Store, amap: _Amap, identity: _Identity
+) -> tuple[int, bytes]:
     """解析请求体 → `dispatch` → JSON 字节。纯函数，可单测（不碰 socket）。
 
     请求体约定 `{"action": "...", "payload": {...}}`；体非法 JSON/非对象 → 400。
@@ -53,7 +57,11 @@ def handle(body_bytes: bytes, *, store: _Store, amap: _Amap) -> tuple[int, bytes
         return 400, _json({"error": "请求体须为对象"})
     try:
         status, result = dispatch(
-            str(req.get("action") or ""), req.get("payload") or {}, store=store, amap=amap
+            str(req.get("action") or ""),
+            req.get("payload") or {},
+            store=store,
+            amap=amap,
+            identity=identity,
         )
     except Exception as exc:  # noqa: BLE001  HTTP 边界兜底：下游(钉钉/高德)任何异常都回 JSON，绝不让进程崩
         logger.exception("dispatch 未捕获异常")
@@ -65,7 +73,9 @@ def _json(obj: dict[str, Any]) -> bytes:
     return json.dumps(obj, ensure_ascii=False).encode("utf-8")
 
 
-def _make_handler(store: _Store, amap: _Amap) -> type[BaseHTTPRequestHandler]:
+def _make_handler(
+    store: _Store, amap: _Amap, identity: _Identity
+) -> type[BaseHTTPRequestHandler]:
     class _Handler(BaseHTTPRequestHandler):
         def _send(self, status: int, body: bytes) -> None:
             self.send_response(status)
@@ -81,7 +91,7 @@ def _make_handler(store: _Store, amap: _Amap) -> type[BaseHTTPRequestHandler]:
             try:
                 length = int(self.headers.get("Content-Length") or 0)
                 body = self.rfile.read(length) if length > 0 else b""
-                status, out = handle(body, store=store, amap=amap)
+                status, out = handle(body, store=store, amap=amap, identity=identity)
             except Exception as exc:  # noqa: BLE001  连读体都可能炸，仍要回响应而非断连
                 logger.exception("do_POST 未捕获异常")
                 status, out = 500, _json({"error": f"服务器错误：{type(exc).__name__}: {exc}"})
@@ -95,8 +105,8 @@ def _make_handler(store: _Store, amap: _Amap) -> type[BaseHTTPRequestHandler]:
 
 def main() -> None:
     port = int(os.environ.get("FC_SERVER_PORT") or os.environ.get("PORT") or "9000")
-    store, amap = build_context()
-    server = ThreadingHTTPServer(("0.0.0.0", port), _make_handler(store, amap))
+    store, amap, identity = build_context()
+    server = ThreadingHTTPServer(("0.0.0.0", port), _make_handler(store, amap, identity))
     logger.info("survey_broker HTTP server 监听 :%d", port)
     server.serve_forever()
 

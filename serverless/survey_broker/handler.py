@@ -12,6 +12,7 @@ import os
 from typing import Any, Protocol
 
 from serverless.survey_broker.amap import AmapClient
+from serverless.survey_broker.identity import DingtalkIdentity
 from serverless.survey_broker.store import SurveyBrokerStore
 from src.dingtalk.notable import NotableClient
 
@@ -44,6 +45,12 @@ class _Amap(Protocol):
     def prefill_geo(self, lng: float, lat: float) -> dict[str, Any]: ...
 
 
+class _Identity(Protocol):
+    """`dispatch` 只需要 identity 的这一个方法（`DingtalkIdentity` 天然满足）。"""
+
+    def whoami(self, auth_code: str) -> dict[str, Any]: ...
+
+
 def _require(payload: dict[str, Any], key: str) -> Any:
     """payload 里必填字段缺失 → ValueError（映射成 400）。
 
@@ -56,9 +63,9 @@ def _require(payload: dict[str, Any], key: str) -> Any:
 
 
 def dispatch(
-    action: str, payload: dict[str, Any], *, store: _Store, amap: _Amap
+    action: str, payload: dict[str, Any], *, store: _Store, amap: _Amap, identity: _Identity
 ) -> tuple[int, dict[str, Any]]:
-    """路由一个动作到 store/amap。
+    """路由一个动作到 store/amap/identity。
 
     Returns:
         `(http_status, body)`。成功 200；未知 action 400；请求缺字段/内容坏 400；
@@ -67,6 +74,8 @@ def dispatch(
     if not isinstance(payload, dict):
         return 400, {"error": "payload 必须是对象"}
     try:
+        if action == "whoami":
+            return 200, identity.whoami(str(_require(payload, "authCode")))
         if action == "saveDraft":
             content = payload.get("content")
             if not isinstance(content, dict):
@@ -139,8 +148,9 @@ def handler(event: bytes | dict[str, Any], context: Any) -> dict[str, Any]:
     )
     store = SurveyBrokerStore(client, os.environ["NOTABLE_SURVEY_SHEET"])
     amap = AmapClient(os.environ["AMAP_KEY"])
+    identity = DingtalkIdentity(client.access_token)
 
-    status, result = dispatch(action, payload, store=store, amap=amap)
+    status, result = dispatch(action, payload, store=store, amap=amap, identity=identity)
     return {
         "statusCode": status,
         "headers": {"Content-Type": "application/json"},

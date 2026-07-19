@@ -92,6 +92,10 @@ class NotableClient:
         self._token_expiry = self._clock() + float(obj["expireIn"]) - _TOKEN_EARLY_REFRESH
         return self._token
 
+    def access_token(self) -> str:
+        """公开取当前 accessToken（带缓存）。供同应用的免登等其它调用复用同一 token。"""
+        return self._access_token()
+
     # ------------------------------------------------------------ 底层请求
 
     def _raw(
