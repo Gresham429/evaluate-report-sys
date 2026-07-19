@@ -36,3 +36,8 @@ __pycache__/
 
 # FC 部署产物(构建生成,不入库)
 serverless/dist/
+
+# 钉钉小程序 CLI:ding.config.json 含 API token(短期凭证),勿入库;构建产物同理
+miniprogram/ding.config.json
+miniprogram/dist/
+miniprogram/.dev/
