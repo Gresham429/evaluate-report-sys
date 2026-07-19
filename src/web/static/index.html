@@ -331,9 +331,11 @@
           </select>
           <button id="newBtn" type="button">新建空白表单</button>
           <label class="filebtn">导入 Excel 预填<input type="file" id="xlsx" accept=".xlsx" hidden></label>
+          <button id="surveyBtn" type="button">从实勘问卷拉取</button>
           <span class="status" id="xlsx-status"></span>
         </div>
         <div class="err" id="sourceError" hidden></div>
+        <div id="surveyPicker" hidden></div>
         <div id="draftList"></div>
       </div>
     </section>
@@ -790,6 +792,18 @@ $('newBtn').addEventListener('click', async () => {
   }
 });
 
+/** Excel 导入与实勘问卷拉取共用：把预填 payload 铺进表单状态。
+ * asset_conditions 与 project 同级返回（不进 Project 数据类，见 app.py 注释），
+ * 并进 currentProject 随整体提交/存草稿预填每因素描述框。origin 决定单价来源标签：
+ * Excel 带最终价（'excel'）；问卷无比较法价（'empty'），价由后续选实例重算。 */
+function applyPrefillBody(body, origin) {
+  currentProject = body.project;
+  currentProject.asset_conditions = body.asset_conditions || {};
+  subjectLevels = body.subject_levels;
+  priceOrigin = origin;
+  lastCompute = null;
+}
+
 $('xlsx').addEventListener('change', async (event) => {
   const file = event.target.files[0];
   if (!file) return;
@@ -805,13 +819,7 @@ $('xlsx').addEventListener('change', async (event) => {
     return;
   }
   const body = await response.json();
-  currentProject = body.project;
-  // asset_conditions 与 project 同级返回（不进 Project 数据类，见 app.py 注释），
-  // 表单这层把它并进 currentProject，随整体提交/存草稿——预填每因素描述框。
-  currentProject.asset_conditions = body.asset_conditions || {};
-  subjectLevels = body.subject_levels;
-  priceOrigin = 'excel';
-  lastCompute = null;
+  applyPrefillBody(body, 'excel');
   $('xlsx-status').textContent = file.name;
   $('xlsx-status').className = 'status done';
   try {
@@ -822,6 +830,76 @@ $('xlsx').addEventListener('change', async (event) => {
     return;
   }
   $('warnings').innerHTML = body.warnings.map((w) => `<div class="warn">${esc(w.message)}</div>`).join('');
+  scheduleDraftSave();
+});
+
+// ── 从实勘问卷拉取（多维表已提交问卷 → 预填表单）────────────
+$('surveyBtn').addEventListener('click', async () => {
+  $('sourceError').hidden = true;
+  const picker = $('surveyPicker');
+  picker.hidden = false;
+  picker.innerHTML = '<span class="status">加载已提交问卷……</span>';
+  let r;
+  try {
+    r = await fetch('/api/survey/list');
+  } catch (e) {
+    picker.hidden = true;
+    $('sourceError').textContent = '拉取失败：无法连接服务。';
+    $('sourceError').hidden = false;
+    return;
+  }
+  if (!r.ok) {
+    picker.hidden = true;
+    $('sourceError').textContent = '拉取失败：' + (await r.json()).detail;
+    $('sourceError').hidden = false;
+    return;
+  }
+  const surveys = (await r.json()).surveys;
+  if (!surveys.length) {
+    picker.innerHTML = '<div class="note">多维表里还没有「已提交」的实勘问卷。</div>';
+    return;
+  }
+  picker.innerHTML = surveys.map((s) =>
+    `<button type="button" class="surveyRow" data-id="${esc(s.问卷ID)}"
+       style="display:block;width:100%;text-align:left;margin:4px 0;padding:8px">
+       <b>${esc(s.category)}</b> · 填报人 ${esc(s.填报人)} ·
+       ${esc((s.更新时间 || '').slice(0, 16).replace('T', ' '))}
+       <span style="opacity:.6">（${esc(s.问卷ID)}）</span>
+     </button>`).join('');
+});
+
+$('surveyPicker').addEventListener('click', async (event) => {
+  const btn = event.target.closest('.surveyRow');
+  if (!btn) return;
+  $('sourceError').hidden = true;
+  let r;
+  try {
+    r = await fetch('/api/survey/pull?id=' + encodeURIComponent(btn.dataset.id));
+  } catch (e) {
+    $('sourceError').textContent = '拉取失败：无法连接服务。';
+    $('sourceError').hidden = false;
+    return;
+  }
+  if (!r.ok) {
+    $('sourceError').textContent = '拉取失败：' + (await r.json()).detail;
+    $('sourceError').hidden = false;
+    return;
+  }
+  const body = await r.json();
+  // 问卷无比较法价（单价/离散度留 0），价由后续「选实例」重算——故 origin='empty'。
+  applyPrefillBody(body, 'empty');
+  $('surveyPicker').hidden = true;
+  $('xlsx-status').textContent = '实勘问卷 ' + (body.questionnaire_id || '');
+  $('xlsx-status').className = 'status done';
+  try {
+    await openForm(currentProject.category);
+  } catch (err) {
+    $('sourceError').textContent = err.message;
+    $('sourceError').hidden = false;
+    return;
+  }
+  $('warnings').innerHTML = (body.warnings || [])
+    .map((w) => `<div class="warn">${esc(w.message)}</div>`).join('');
   scheduleDraftSave();
 });
 
