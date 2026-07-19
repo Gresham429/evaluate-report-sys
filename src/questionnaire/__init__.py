@@ -9,14 +9,17 @@ from src.questionnaire.model import (
     known_basic_keys,
 )
 from src.questionnaire.prefill import survey_to_prefill
+from src.questionnaire.provision import SURVEY_SHEET_FIELDS, ensure_survey_sheet
 from src.questionnaire.validation import validate_survey
 
 __all__ = [
     "STATUS_DRAFT",
     "STATUS_SUBMITTED",
+    "SURVEY_SHEET_FIELDS",
     "SurveyInfo",
     "SurveyResponse",
     "SurveyPullBackend",
+    "ensure_survey_sheet",
     "known_basic_keys",
     "response_to_fields",
     "survey_to_prefill",
