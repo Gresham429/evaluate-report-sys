@@ -83,3 +83,18 @@ def test_prefill_geo_returns_empty_facts_on_malformed_json() -> None:
     facts = client.prefill_geo(120.0, 30.0)
 
     assert facts == {"address": "", "bus_stops": [], "nearest_metro": None, "facilities": []}
+
+
+def test_metro_with_unparsable_distance_kept_as_facility() -> None:
+    # 地铁站距离解析不出：不进 nearest_metro，但事实不丢——退回 facilities
+    def transport(url: str) -> tuple[int, str]:
+        if "regeo" in url:
+            return 200, json.dumps({"status": "1", "regeocode": {"formatted_address": "某地"}})
+        return 200, _around_response(
+            [{"name": "坏距离地铁站", "type": "地铁站", "distance": "N/A"}]
+        )
+
+    client = AmapClient("key", transport=transport)
+    facts = client.prefill_geo(120.0, 30.0)
+    assert facts["nearest_metro"] is None
+    assert "坏距离地铁站" in facts["facilities"]

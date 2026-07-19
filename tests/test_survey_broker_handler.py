@@ -143,3 +143,10 @@ def test_dispatch_load_draft_missing_survey_id_returns_400() -> None:
     status, body = dispatch("loadDraft", {}, store=FakeStore(), amap=FakeAmap())
     assert status == 400
     assert "error" in body
+
+
+def test_dispatch_non_dict_payload_returns_400() -> None:
+    # payload 不是对象（如误传数组）→ 400 而非未捕获 500
+    status, body = dispatch("saveDraft", [1, 2], store=FakeStore(), amap=FakeAmap())  # type: ignore[arg-type]
+    assert status == 400
+    assert "error" in body

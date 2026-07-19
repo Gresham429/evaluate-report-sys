@@ -131,6 +131,8 @@ class AmapClient:
                 try:
                     distance = float(poi.get("distance") or 0)
                 except (TypeError, ValueError):
+                    # 距离解析不出也别把这个地铁站事实丢了——退回 facilities 让估价师看到
+                    facilities.append(name)
                     continue
                 if nearest_distance is None or distance < nearest_distance:
                     nearest_distance = distance

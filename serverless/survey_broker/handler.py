@@ -64,6 +64,8 @@ def dispatch(
         `(http_status, body)`。成功 200；未知 action 400；请求缺字段/内容坏 400；
         问卷不存在 404（KeyError 只从 store 的"找不到"语义产生，见 `_require`）。
     """
+    if not isinstance(payload, dict):
+        return 400, {"error": "payload 必须是对象"}
     try:
         if action == "saveDraft":
             content = payload.get("content")
