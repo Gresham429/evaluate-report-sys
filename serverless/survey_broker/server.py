@@ -51,7 +51,13 @@ def handle(body_bytes: bytes, *, store: _Store, amap: _Amap) -> tuple[int, bytes
         return 400, _json({"error": f"请求体非合法 JSON：{exc}"})
     if not isinstance(req, dict):
         return 400, _json({"error": "请求体须为对象"})
-    status, result = dispatch(str(req.get("action") or ""), req.get("payload") or {}, store=store, amap=amap)
+    try:
+        status, result = dispatch(
+            str(req.get("action") or ""), req.get("payload") or {}, store=store, amap=amap
+        )
+    except Exception as exc:  # noqa: BLE001  HTTP 边界兜底：下游(钉钉/高德)任何异常都回 JSON，绝不让进程崩
+        logger.exception("dispatch 未捕获异常")
+        return 500, _json({"error": f"内部错误：{type(exc).__name__}: {exc}"})
     return status, _json(result)
 
 
@@ -72,9 +78,13 @@ def _make_handler(store: _Store, amap: _Amap) -> type[BaseHTTPRequestHandler]:
             self._send(200, b'{"ok":true}')
 
         def do_POST(self) -> None:
-            length = int(self.headers.get("Content-Length") or 0)
-            body = self.rfile.read(length) if length > 0 else b""
-            status, out = handle(body, store=store, amap=amap)
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = self.rfile.read(length) if length > 0 else b""
+                status, out = handle(body, store=store, amap=amap)
+            except Exception as exc:  # noqa: BLE001  连读体都可能炸，仍要回响应而非断连
+                logger.exception("do_POST 未捕获异常")
+                status, out = 500, _json({"error": f"服务器错误：{type(exc).__name__}: {exc}"})
             self._send(status, out)
 
         def log_message(self, *args: Any) -> None:  # 静音默认 stderr 访问日志

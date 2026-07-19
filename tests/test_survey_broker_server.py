@@ -72,3 +72,21 @@ def test_handle_submit_missing_returns_404() -> None:
     body = json.dumps({"action": "submit", "payload": {"survey_id": "ghost"}}).encode("utf-8")
     status, out = handle(body, store=FakeStore(), amap=FakeAmap())
     assert status == 404
+
+
+def test_handle_downstream_exception_returns_500() -> None:
+    # 下游(钉钉)抛非 KeyError/ValueError 异常时，HTTP 边界兜底回 500 而非让进程崩
+    class BoomStore:
+        def save_draft(self, **kwargs: Any) -> str:
+            raise RuntimeError("钉钉炸了")
+
+        def load(self, survey_id: str) -> dict[str, Any]:
+            raise RuntimeError("钉钉炸了")
+
+        def submit(self, survey_id: str) -> None:
+            raise RuntimeError("钉钉炸了")
+
+    body = json.dumps({"action": "loadDraft", "payload": {"survey_id": "x"}}).encode("utf-8")
+    status, out = handle(body, store=BoomStore(), amap=FakeAmap())
+    assert status == 500
+    assert "error" in json.loads(out)

@@ -39,7 +39,7 @@
 
 ### 两种入口，二选一（按 FC 创建函数时选的运行时）
 - **自定义运行时（Web Server 模式，推荐、已按此走）**：用 `server.py` 起一个标准库 HTTP Server。
-  - 启动命令：`python -m serverless.survey_broker.server`
+  - 启动命令：`python3 -m serverless.survey_broker.server`
   - 监听端口：`9000`（`server.py` 读 `FC_SERVER_PORT`/`PORT`，缺省 9000，与控制台「监听端口」一致）
   - 请求：`POST` body `{"action":"saveDraft|loadDraft|submit|prefillGeo","payload":{...}}` → JSON；`GET /` 健康检查回 200。
   - 客户端在进程启动时建一次（`build_context`），warm 容器复用、token 缓存复用。

@@ -41,7 +41,7 @@ def main() -> None:
     print(f"打包完成：{out}")
     print(f"含 {len(FILES)} 个文件，零第三方依赖。")
     print("FC 自定义运行时(Web Server 模式)：")
-    print("  启动命令 = python -m serverless.survey_broker.server")
+    print("  启动命令 = python3 -m serverless.survey_broker.server")
     print("  监听端口 = 9000")
 
 
