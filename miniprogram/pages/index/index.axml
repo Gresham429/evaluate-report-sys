@@ -9,7 +9,7 @@
 
 <view class="card" a:if="{{drafts.length > 0}}">
   <view>本机草稿（可续填）</view>
-  <view class="draft" a:for="{{drafts}}" key="{{item.survey_id}}" data-id="{{item.survey_id}}" onTap="onResume">
+  <view class="draft" a:for="{{drafts}}" key="{{item.open_id}}" data-id="{{item.open_id}}" onTap="onResume">
     <view class="draft-h">{{item.category}} · {{item.status || '草稿'}}</view>
     <view class="muted">{{item.updated_at}} · {{item.survey_id}}</view>
   </view>

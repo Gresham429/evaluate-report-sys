@@ -1,4 +1,5 @@
 const broker = require('../../utils/broker');
+const store = require('../../utils/store');
 const app = getApp();
 
 const FIELDS = [
@@ -19,41 +20,90 @@ Page({
   data: {
     fields: FIELDS, categories: CATEGORIES, catIndex: 0,
     form: { category: '', basic: {} },
-    survey_id: '', gps: null, geo: {}, msg: '',
+    localId: '', survey_id: '', gps: null, geo: {}, msg: '',
     serverStatus: '',   // 载入/存过后的服务端状态：草稿 / 已提交
-    dirty: false,       // 载入后有本地改动、尚未暂存或提交
+    dirty: false,       // 本地有改动、尚未成功同步
+    offline: false,     // 上一次网络操作失败（数据已在本机）
   },
 
   onLoad(q) {
     if (q && q.draftId) this.resume(q.draftId);
+    else this.setData({ localId: store.newLocalId() });   // 新建即建本地 id
   },
 
+  // 续填：先本地内容秒回填，再联网对账
   resume(id) {
-    broker.request('loadDraft', { survey_id: id }).then((d) => {
+    const isLocal = String(id).indexOf('local-') === 0;
+    store.loadDraftLocal(id).then((d) => {
+      if (d) {
+        this.setData({
+          localId: d.id || id,
+          survey_id: d.serverId || (isLocal ? '' : id),
+          form: { category: d.category || '', basic: d.basic || {} },
+          gps: d.gps || null, geo: d.geo || {},
+          catIndex: Math.max(0, CATEGORIES.indexOf(d.category)),
+          serverStatus: d.status || '', dirty: !!d.dirty,
+        });
+      } else {
+        this.setData({ localId: isLocal ? id : store.newLocalId(),
+          survey_id: isLocal ? '' : id });
+      }
+      const sid = (d && d.serverId) || (isLocal ? '' : id);
+      if (sid) this._refreshFromServer(sid);
+    });
+  },
+
+  // 联网用服务端版本对账（本地有未同步改动时不覆盖，护住现场输入）
+  _refreshFromServer(sid) {
+    broker.request('loadDraft', { survey_id: sid }).then((d) => {
+      if (this.data.dirty) { this.setData({ offline: false }); return; }
       const c = d.content || {};
+      const draft = {
+        id: this.data.localId || sid, serverId: sid,
+        category: d.category || '', basic: c.basic || {}, gps: c.gps || null,
+        geo: this.data.geo || {}, updatedAt: d.updated_at || '',
+        status: d.status || '', dirty: false,
+      };
+      store.saveDraftLocal(draft);
       this.setData({
-        survey_id: id,
-        form: { category: d.category || '', basic: c.basic || {} },
-        gps: c.gps || null,
-        catIndex: Math.max(0, CATEGORIES.indexOf(d.category)),
-        serverStatus: d.status || '',
-        dirty: false,   // 刚载入，与服务端一致
+        survey_id: sid, form: { category: draft.category, basic: draft.basic },
+        gps: draft.gps, catIndex: Math.max(0, CATEGORIES.indexOf(draft.category)),
+        serverStatus: draft.status, dirty: false, offline: false,
       });
-    }).catch((e) => this.setData({ msg: '载入草稿失败：' + e.detail }));
+    }).catch(() => this.setData({ offline: true }));
+  },
+
+  _draftObj(extra) {
+    return store.assign({
+      id: this.data.localId, serverId: this.data.survey_id || '',
+      category: this.data.form.category, basic: this.data.form.basic,
+      gps: this.data.gps, geo: this.data.geo,
+      updatedAt: new Date().toISOString(),
+      status: this.data.serverStatus || '草稿', dirty: true,
+    }, extra || {});
+  },
+
+  // 任一改动即本地存盘（改动即存，不丢）
+  _autosave() {
+    this.setData({ dirty: true });
+    store.saveDraftLocal(this._draftObj({ dirty: true }));
   },
 
   onCategory(e) {
     const cat = CATEGORIES[e.detail.value];
-    this.setData({ catIndex: e.detail.value, 'form.category': cat, dirty: true });
+    this.setData({ catIndex: e.detail.value, 'form.category': cat });
+    this._autosave();
   },
   onField(e) {
-    this.setData({ ['form.basic.' + e.currentTarget.dataset.key]: e.detail.value, dirty: true });
+    this.setData({ ['form.basic.' + e.currentTarget.dataset.key]: e.detail.value });
+    this._autosave();
   },
 
   onGeo() {
     dd.getLocation({
       success: (loc) => {
-        this.setData({ gps: { lat: loc.latitude, lng: loc.longitude }, dirty: true });
+        this.setData({ gps: { lat: loc.latitude, lng: loc.longitude } });
+        this._autosave();
         broker.request('prefillGeo', { lng: loc.longitude, lat: loc.latitude }).then((f) => {
           const metro = f.nearest_metro;
           this.setData({ geo: {
@@ -62,7 +112,8 @@ Page({
             facilities: (f.facilities || []).slice(0, 6).join('、'),
             metroText: metro ? (metro.name + ' 约' + metro.distance_m + '米') : '（无）',
           }});
-        }).catch((e) => this.setData({ msg: '地图预填失败：' + e.detail }));
+          this._autosave();
+        }).catch((e) => this.setData({ msg: '地图预填失败：' + e.detail, offline: true }));
       },
       fail: (e) => this.setData({ msg: '取定位失败：' + ((e && e.errorMessage) || '') }),
     });
@@ -70,8 +121,7 @@ Page({
 
   _content() {
     return {
-      basic: this.data.form.basic,
-      gps: this.data.gps,
+      basic: this.data.form.basic, gps: this.data.gps,
       subjects: [], subject_levels: {}, asset_conditions: {}, photos: [],
     };
   },
@@ -87,34 +137,42 @@ Page({
 
   onSave() {
     if (!this.data.form.category) { this.setData({ msg: '请先选类别' }); return; }
+    store.saveDraftLocal(this._draftObj({ dirty: true }));   // 先落本机，保证不丢
     broker.request('saveDraft', this._payload()).then((r) => {
-      this.rememberLocal(r.survey_id);
-      // 暂存写库后状态回落为“草稿”，本地已与服务端一致
+      this.rememberLegacy(r.survey_id);
+      store.attachServerId(this.data.localId, r.survey_id);
+      store.saveDraftLocal(this._draftObj({ serverId: r.survey_id, status: '草稿', dirty: false }));
       this.setData({ survey_id: r.survey_id, serverStatus: '草稿', dirty: false,
-        msg: '已暂存：' + r.survey_id });
-    }).catch((e) => this.setData({ msg: '暂存失败：' + e.detail }));
+        offline: false, msg: '已暂存：' + r.survey_id });
+    }).catch((e) => this.setData({ offline: true,
+      msg: '未同步（已存本机，联网后重试）：' + ((e && e.detail) || '网络错误') }));
   },
 
   onSubmit() {
     if (!this.data.form.category) { this.setData({ msg: '请先选类别' }); return; }
-    // 先存（拿到/更新 survey_id）再提交
+    store.saveDraftLocal(this._draftObj({ dirty: true }));   // 先落本机
     broker.request('saveDraft', this._payload()).then((r) => {
-      this.rememberLocal(r.survey_id);
+      this.rememberLegacy(r.survey_id);
+      store.attachServerId(this.data.localId, r.survey_id);
       this.setData({ survey_id: r.survey_id });
       return broker.request('submit', { survey_id: r.survey_id });
     }).then(() => {
-      this.setData({ serverStatus: '已提交', dirty: false, msg: '已提交，办公端可拉取。' });
+      store.clearDraftContent(this.data.localId);   // 提交成功清重内容，索引留「已提交」
+      this.setData({ serverStatus: '已提交', dirty: false, offline: false,
+        msg: '已提交，办公端可拉取。' });
       dd.showToast({ content: '已提交同步', type: 'success', duration: 1500 });
-      // 稍候自动退回入口页（入口页 onShow 会刷新草稿列表，显示“已提交”）
+      // 稍候自动退回入口页（入口页 onShow 刷新列表，显示「已提交」）
       setTimeout(() => {
         const pages = (typeof getCurrentPages === 'function') ? getCurrentPages() : [];
         if (pages.length > 1) dd.navigateBack();
         else dd.reLaunch({ url: '/pages/index/index' });
       }, 1200);
-    }).catch((e) => this.setData({ msg: '提交失败：' + e.detail }));
+    }).catch((e) => this.setData({ offline: true,
+      msg: '提交失败（已存本机，联网后重试）：' + ((e && e.detail) || '网络错误') }));
   },
 
-  rememberLocal(id) {
+  // v1 兼容：继续维护 myDrafts（回滚到 v1 代码仍能列出）
+  rememberLegacy(id) {
     dd.getStorage({ key: 'myDrafts', success: (res) => {
       const ids = res.data || [];
       if (ids.indexOf(id) < 0) ids.push(id);
