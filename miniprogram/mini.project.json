@@ -1,11 +1,16 @@
 {
+  "format": 2,
+  "compileOptions": {
+    "component2": true
+  },
   "miniprogramRoot": "./",
   "compileType": "mini",
-  "component2": true,
-  "setting": {
-    "urlCheck": false,
-    "es6": true,
-    "postcss": true,
-    "minified": true
+  "unknownConfig": {
+    "setting": {
+      "urlCheck": false,
+      "es6": true,
+      "postcss": true,
+      "minified": true
+    }
   }
 }
