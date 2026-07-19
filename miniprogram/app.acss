@@ -1,0 +1,4 @@
+page { background: #f5f6f8; color: #222; font-size: 30rpx; }
+.btn-primary { background: #1677ff; color: #fff; border-radius: 8rpx; }
+.card { background: #fff; margin: 16rpx; padding: 24rpx; border-radius: 12rpx; }
+.muted { color: #888; font-size: 26rpx; }
