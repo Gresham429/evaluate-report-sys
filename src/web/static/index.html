@@ -479,20 +479,23 @@
         <strong>旧版本永不覆盖</strong>：能拿旧版把当时的结果重算出来，是可复查的前提。
       </div>
       <div class="actions">
-        <select id="baseCategory" style="width:auto">
-          <option value="农用">农用</option>
-          <option value="办公" selected>办公</option>
-          <option value="商业">商业</option>
-          <option value="住宅">住宅</option>
-          <option value="工业">工业</option>
-          <option value="停车场用地">停车场用地</option>
-          <option value="建设用地">建设用地</option>
-        </select>
+        <button class="filebtn" id="basePull" type="button">从钉钉拉取</button>
         <label class="filebtn">导入基础表<input type="file" id="baseXlsx" accept=".xlsx" hidden></label>
         <span class="status" id="baseStatus"></span>
       </div>
-      <div class="warn" id="baseWarn" hidden></div>
-      <table id="baseVersions"></table>
+      <div id="baseAccordion" class="acc"></div>
+      <style>
+        .acc-cat { border-bottom: 1px solid #eee; }
+        .acc-head { display: flex; gap: 10px; align-items: center; padding: 10px 4px; cursor: pointer; }
+        .acc-arrow { transition: transform .15s; color: #999; }
+        .acc-cat.open .acc-arrow { transform: rotate(90deg); }
+        .acc-body { display: none; padding: 2px 0 10px 26px; }
+        .acc-cat.open .acc-body { display: block; }
+        .acc-ver { display: flex; gap: 10px; align-items: center; padding: 6px 8px; flex-wrap: wrap; }
+        .acc-ver.on { background: #f4f8ff; border-radius: 6px; }
+        .muted { color: #999; font-size: .9em; }
+        button.mini { font-size: .85em; padding: 2px 8px; }
+      </style>
     </section>
   </main>
 
@@ -588,7 +591,7 @@ document.querySelectorAll('nav.tabs button').forEach((btn) => {
     document.querySelectorAll('nav.tabs button').forEach((b) => b.classList.toggle('on', b === btn));
     ['report', 'library', 'base', 'ledger'].forEach((p) => { $('page-' + p).hidden = p !== btn.dataset.tab; });
     if (btn.dataset.tab === 'library') loadLibrary();
-    if (btn.dataset.tab === 'base') loadBaseVersions();
+    if (btn.dataset.tab === 'base') loadBaseAccordion();
     if (btn.dataset.tab === 'ledger') loadLedger();
   });
 });
@@ -1762,83 +1765,77 @@ $('saveInstBtn').addEventListener('click', async () => {
 
 // ── 基础表页 ──────────────────────────────────────────────
 
-async function loadBaseVersions() {
-  const category = $('baseCategory').value;
-  const r = await fetch('/api/base-tables?category=' + encodeURIComponent(category));
+function fmtBaseTime(s) { return s ? esc(s.slice(0, 16).replace('T', ' ')) : ''; }
+
+/** 手风琴：7 类各一行，展开列该类别所有版本（时间倒序），标 latest / 当前生效。 */
+async function loadBaseAccordion() {
+  const r = await fetch('/api/base-tables/all');
   if (!r.ok) return;
-  const { versions, current } = await r.json();
-  $('baseVersions').innerHTML = versions.length ? `
-    <thead><tr><th>版本（内容指纹）</th><th>导入时间</th><th>来源文件</th><th></th></tr></thead>
-    <tbody>${versions.map((v) => `
-      <tr>
-        <td class="ver">${esc(v.指纹)}</td>
-        <td class="num">${esc(v.导入时间.slice(0, 16).replace('T', ' '))}</td>
-        <td>${esc(v.来源文件名)}</td>
-        <td>${v.指纹 === current?.指纹 ? '<span class="chip chip-seal">当前</span>' : ''}</td>
-      </tr>`).join('')}</tbody>` : '';
-  $('baseStatus').textContent = versions.length
-    ? `${category}类，共 ${versions.length} 版`
-    : `${category}类还没有导入过基础表`;
-  $('baseStatus').className = 'status';
+  const { categories } = await r.json();
+  $('baseAccordion').innerHTML = categories.map(renderCatBlock).join('');
 }
 
-$('baseCategory').addEventListener('change', loadBaseVersions);
+function renderCatBlock(c) {
+  const vs = c.versions || [];
+  const activeV = vs.find((v) => v.active);
+  const head = vs.length
+    ? `<strong>${esc(c.类别)}</strong><span class="muted">${vs.length} 版</span>`
+      + `<span class="muted">当前 ${fmtBaseTime(activeV && activeV.导入时间)}`
+      + `${activeV && activeV.latest ? ' · <span class="chip">latest</span>' : ''}</span>`
+    : `<strong>${esc(c.类别)}</strong><span class="muted">（无——从钉钉拉取或导入）</span>`;
+  const body = vs.map((v) => `
+    <div class="acc-ver${v.active ? ' on' : ''}">
+      <span class="ver">${esc(v.指纹)}</span>
+      <span class="num">${fmtBaseTime(v.导入时间)}</span>
+      <span class="muted">${esc(v.来源文件名)}</span>
+      ${v.latest ? '<span class="chip">latest</span>' : ''}
+      ${v.active
+        ? '<span class="chip chip-seal">当前生效</span>'
+        : `<button class="mini" onclick="setActiveVersion('${esc(c.类别)}','${esc(v.指纹)}')">设为当前</button>`}
+    </div>`).join('');
+  return `<div class="acc-cat">
+    <div class="acc-head" onclick="this.parentNode.classList.toggle('open')"><span class="acc-arrow">▸</span>${head}</div>
+    <div class="acc-body">${body}</div>
+  </div>`;
+}
+
+async function setActiveVersion(category, fingerprint) {
+  const r = await fetch('/api/base-tables/active', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ category, fingerprint }),
+  });
+  if (!r.ok) { $('baseStatus').textContent = '设为当前失败：' + (await r.json()).detail; return; }
+  $('baseStatus').textContent = `${category}类当前生效版本已设为 ${fingerprint}`;
+  $('baseStatus').className = 'status done';
+  await loadBaseAccordion();
+}
+
+$('basePull').addEventListener('click', async () => {
+  $('baseStatus').textContent = '从钉钉拉取中……'; $('baseStatus').className = 'status';
+  const r = await fetch('/api/base-tables/pull', { method: 'POST' });
+  if (!r.ok) { $('baseStatus').textContent = '拉取失败：' + (await r.json()).detail; $('baseStatus').className = 'status'; return; }
+  const { pulled } = await r.json();
+  const added = Object.values(pulled).reduce((sum, c) => sum + (c.新增 || 0), 0);
+  $('baseStatus').textContent = added ? `已从钉钉拉取 ${added} 个新版本` : '已是最新，无新增';
+  $('baseStatus').className = 'status done';
+  await loadBaseAccordion();
+});
 
 $('baseXlsx').addEventListener('change', async (event) => {
   const file = event.target.files[0];
   if (!file) return;
   event.target.value = '';
-  $('baseStatus').textContent = '导入中……';
+  $('baseStatus').textContent = '导入中……'; $('baseStatus').className = 'status';
   const form = new FormData();
   form.append('file', file);
   const r = await fetch('/api/base-tables', { method: 'POST', body: form });
   if (!r.ok) { $('baseStatus').textContent = '导入失败：' + (await r.json()).detail; return; }
   const body = await r.json();
-  const importedCategory = body.base_table.类别;
-  $('baseCategory').value = importedCategory;
-  // 「是否首次导入」必须针对本次导入实际命中的类别——它由后端按文件内容判定，
-  // 可能与导入前下拉框停留的类别不同（如下拉框停在办公，直接导入商业基础表）。
-  // 不能像先前那样用一个跨类别共享的全局变量（当时下拉框选中类别的指纹）来判断，
-  // 那会把办公类的指纹当成商业类「之前的当前版」，也可能把商业类此前已有的当前版
-  // 误判为「没有」（本 session 恰好没加载过商业类）。
-  // 新版此刻已经落盘、追加在该类别台账末尾：直接按「导入命中的类别」重新拉一次
-  // 版本列表（导入时间新→旧），长度为 1 即该类别首次导入；大于 1 时，索引 1
-  // 就是导入前的当前版——纯前端可解，不必改后端。
-  let before = '';
-  if (body.是否新版) {
-    const catResp = await fetch('/api/base-tables?category=' + encodeURIComponent(importedCategory));
-    if (catResp.ok) {
-      const { versions } = await catResp.json();
-      before = versions.length > 1 ? versions[1].指纹 : '';
-    }
-  }
-  // 先刷版本表，再写提示——loadBaseVersions 自己也写 baseStatus，
-  // 顺序反了的话「未新增版本」这句会被它当场盖掉，估价师根本看不见。
-  await loadBaseVersions();
-  if (body.是否新版) {
-    $('baseStatus').textContent = `已导入新版本 ${body.base_table.指纹}（${body.base_table.类别}类）`;
-    $('baseStatus').className = 'status done';
-    // 只有「之前已有当前版」时，才谈得上「与之前版不同」——首次导入没有
-    // 前一版可比较，不该报警告（brief 原文只按「是否新版」就报警告，
-    // 会在该类别首次导入时也弹出「与（无）不同」，与设计 §3「若指纹与
-    // 当前版不同」的措辞矛盾，此处补上 before 判断，见 task-7-report.md）。
-    if (before) {
-      // 新版会静默成为「当前」，之后所有新报告都用它。估价师若只是想调某一份报告，
-      // 这不是正确的做法——但今天他没有别的做法可用，所以至少要让他知道自己动了什么。
-      $('baseWarn').innerHTML =
-        `⚠ 这与之前的当前版 <span class="ver">${esc(before)}</span> 不同。<br>` +
-        `<strong>此机器上之后所有新建的报告都将使用新版 ${esc(body.base_table.指纹)}。</strong><br>` +
-        `若你只是想调整某一份报告，这不是正确的做法——单份偏离尚未上线。<br>` +
-        `旧版仍在，不会被删除；已生成报告的台账仍指向它们当时那版。`;
-      $('baseWarn').hidden = false;
-    } else {
-      $('baseWarn').hidden = true;
-    }
-  } else {
-    $('baseStatus').textContent = `内容与 ${body.base_table.指纹} 相同，未新增版本——基础表没改过`;
-    $('baseStatus').className = 'status done';
-    $('baseWarn').hidden = true;
-  }
+  $('baseStatus').textContent = body.是否新版
+    ? `已导入新版本 ${body.base_table.指纹}（${body.base_table.类别}类，成为最新；未固定生效版则自动生效）`
+    : `内容与 ${body.base_table.指纹} 相同，未新增版本——基础表没改过`;
+  $('baseStatus').className = 'status done';
+  await loadBaseAccordion();
 });
 
 // ── 台账页 ────────────────────────────────────────────────
