@@ -53,6 +53,11 @@ from src.knowledge_base.store import (
     BaseTableStore,
     VersionInfo,
 )
+from src.knowledge_base.active import ActiveVersions, active_fingerprint
+from src.knowledge_base.backend import LocalFileBaseTableBackend
+from src.knowledge_base.sync import pull as pull_base_tables
+from src.knowledge_base.sync import push_version as push_base_table
+from src.dingtalk.factory import notable_base_table_backend
 from src.ledger.model import BaseTableUse, Deviation, InstanceUse, LedgerEntry, MethodUse
 from src.ledger.model import to_dict as ledger_to_dict
 from src.ledger.replay import replay
@@ -109,6 +114,25 @@ def _version_payload(info: VersionInfo) -> dict[str, object]:
         "导入时间": info.导入时间.isoformat(),
         "来源文件名": info.来源文件名,
     }
+
+
+def _base_table_fingerprint(store: BaseTableStore, cat: Category, explicit: object) -> str | None:
+    """出报告/取因素用哪一版基础表：请求显式给了 `base_table` 指纹用之；否则用该类别
+    本地**生效版本**（D2，缺省回落最新导入版）。返回 None 表示该类别尚无任何版本。"""
+    if explicit:
+        return str(explicit)
+    return active_fingerprint(store, ActiveVersions(_base_table_dir()), cat)
+
+
+def _push_base_table_if_online(store: BaseTableStore, cat: Category, fingerprint: str) -> None:
+    """导入后把该版推一份进多维表（D4）；多维表未配/离线则静默跳过，绝不拖累本地导入。"""
+    remote = notable_base_table_backend()
+    if remote is None:
+        return
+    try:
+        push_base_table(remote, LocalFileBaseTableBackend(_base_table_dir()), cat, fingerprint)
+    except Exception:  # noqa: BLE001  推送失败（离线/多维表抖动）不该让本地导入失败
+        logger.exception("基础表 %s/%s 推送多维表失败（本地导入已成功）", cat.value, fingerprint)
 
 
 def _to_float(value: object) -> float:
@@ -246,7 +270,10 @@ def _project_from_payload(data: dict[str, object]) -> Project:
     asset_condition_groups: tuple[ConditionGroup, ...] = ()
     if descriptions:
         try:
-            knowledge = BaseTableStore(_base_table_dir()).load(category)
+            _bt_store = BaseTableStore(_base_table_dir())
+            knowledge = _bt_store.load(
+                category, _base_table_fingerprint(_bt_store, category, None)
+            )
         except FileNotFoundError as exc:
             raise ValueError(
                 f"带资产状况描述渲染但尚未导入过 {category.value} 类基础表：{exc}"
@@ -419,9 +446,9 @@ def _build_ledger_entry(project: Project, raw: dict[str, Any] | None) -> LedgerE
     category = Category(str(raw.get("category", project.category.value)))
     fingerprint_raw = raw.get("base_table")
     base_store = BaseTableStore(_base_table_dir())
-    knowledge = base_store.load(category, str(fingerprint_raw) if fingerprint_raw else None)
-    current = base_store.current(category)
-    baseline = str(fingerprint_raw) if fingerprint_raw else (current.指纹 if current else "")
+    fp = _base_table_fingerprint(base_store, category, fingerprint_raw)
+    knowledge = base_store.load(category, fp)
+    baseline = fp or ""
 
     # 单份偏离：覆盖为空即原样返回 knowledge 与空元组，旧 payload（没有
     # coefficient_overrides 字段）行为不变，向后兼容。
@@ -690,9 +717,10 @@ def create_app() -> FastAPI:
             ) from exc
 
         raw_fingerprint = payload.get("base_table")
+        _bt = BaseTableStore(_base_table_dir())
         try:
-            knowledge = BaseTableStore(_base_table_dir()).load(
-                category, str(raw_fingerprint) if raw_fingerprint else None
+            knowledge = _bt.load(
+                category, _base_table_fingerprint(_bt, category, raw_fingerprint)
             )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -930,11 +958,12 @@ def create_app() -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=f"未知类别：{category}") from exc
         store = BaseTableStore(_base_table_dir())
+        fp = _base_table_fingerprint(store, cat, fingerprint)
         try:
-            knowledge = store.load(cat, fingerprint)
+            knowledge = store.load(cat, fp)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        info = store.current(cat)
+        info = next((v for v in store.list_versions(cat) if v.指纹 == fp), None)
         return {
             "factors": [
                 {
@@ -960,6 +989,33 @@ def create_app() -> FastAPI:
             "base_table": _version_payload(info) if info else None,
         }
 
+    def _versions_view(
+        store: BaseTableStore, active: ActiveVersions, cat: Category
+    ) -> dict[str, object]:
+        """某类别版本视图：版本列表（新→旧，各带 latest/active 标）+ 生效指纹。"""
+        versions = store.list_versions(cat)
+        latest_fp = versions[0].指纹 if versions else None
+        active_fp = active_fingerprint(store, active, cat)
+        return {
+            "类别": cat.value,
+            "生效指纹": active_fp,
+            "versions": [
+                {
+                    **_version_payload(v),
+                    "latest": v.指纹 == latest_fp,
+                    "active": v.指纹 == active_fp,
+                }
+                for v in versions
+            ],
+        }
+
+    @app.get("/api/base-tables/all")
+    def list_all_base_tables() -> dict[str, object]:
+        """全部类别的基础表版本（供基础表页手风琴）：每类别版本 + 生效版 + latest 标。"""
+        store = BaseTableStore(_base_table_dir())
+        active = ActiveVersions(_base_table_dir())
+        return {"categories": [_versions_view(store, active, cat) for cat in Category]}
+
     @app.get("/api/base-tables")
     def list_base_tables(category: str) -> dict[str, object]:
         """某类别的全部基础表版本，导入时间新→旧。旧版永不覆盖，故都在。"""
@@ -968,17 +1024,46 @@ def create_app() -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=f"未知类别：{category}") from exc
         store = BaseTableStore(_base_table_dir())
-        current = store.current(cat)
-        return {
-            "versions": [_version_payload(v) for v in store.list_versions(cat)],
-            "current": _version_payload(current) if current else None,
-        }
+        return _versions_view(store, ActiveVersions(_base_table_dir()), cat)
+
+    @app.post("/api/base-tables/pull")
+    def pull_base_tables_from_notable() -> dict[str, object]:
+        """从多维表拉取基础表版本到本地（并集，已有不动）。未配→409；网络异常→502。"""
+        remote = notable_base_table_backend()
+        if remote is None:
+            raise HTTPException(
+                status_code=409, detail="从多维表拉取需配好凭据与基础表 sheet（检查 .env）"
+            )
+        local = LocalFileBaseTableBackend(_base_table_dir())
+        try:
+            result = pull_base_tables(local, remote)
+        except Exception as exc:  # noqa: BLE001  网络/多维表异常兜底回 502，不崩
+            logger.exception("从多维表拉取基础表失败")
+            raise HTTPException(status_code=502, detail=f"拉取失败：{exc}") from exc
+        return {"pulled": result}
+
+    @app.post("/api/base-tables/active")
+    def set_active_base_table(payload: dict[str, Any]) -> dict[str, object]:
+        """把某类别的生效版本设为某指纹（D2）。指纹须本地已有，否则 400。"""
+        try:
+            cat = Category(str(payload.get("category", "")))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400, detail=f"未知类别：{payload.get('category')!r}"
+            ) from exc
+        fingerprint = str(payload.get("fingerprint", "")).strip()
+        store = BaseTableStore(_base_table_dir())
+        if not any(v.指纹 == fingerprint for v in store.list_versions(cat)):
+            raise HTTPException(status_code=400, detail=f"{cat.value} 类无版本 {fingerprint}")
+        ActiveVersions(_base_table_dir()).set(cat, fingerprint)
+        return {"category": cat.value, "生效指纹": fingerprint}
 
     @app.post("/api/base-tables")
     async def import_base_table(file: UploadFile) -> dict[str, object]:
         """导入基础表（方案乙：Excel 是权威，系统存副本，改了重导一次）。
 
         指纹相同即空操作——「估价师没改基础表就又导了一次」是常态，不是错误。
+        导入后若配了多维表，把该版推一份上去（D4）。
         """
         if not (file.filename or "").lower().endswith(".xlsx"):
             raise HTTPException(status_code=400, detail="只接受 .xlsx 文件")
@@ -986,11 +1071,13 @@ def create_app() -> FastAPI:
         path = workdir / (file.filename or "基础表.xlsx")
         path.write_bytes(await file.read())
         try:
-            imported = BaseTableStore(_base_table_dir()).import_from_excel(path)
+            store = BaseTableStore(_base_table_dir())
+            imported = store.import_from_excel(path)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
+        _push_base_table_if_online(store, imported.版本.类别, imported.版本.指纹)
         return {"base_table": _version_payload(imported.版本), "是否新版": imported.是否新版}
 
     @app.get("/api/ledger")

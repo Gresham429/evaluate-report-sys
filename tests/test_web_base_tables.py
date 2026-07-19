@@ -119,9 +119,57 @@ def test_compute_without_base_table_is_400(client: TestClient) -> None:
 def test_base_tables_list_empty_for_untouched_category(client: TestClient) -> None:
     body = client.get("/api/base-tables", params={"category": "商业"}).json()
     assert body["versions"] == []
-    assert body["current"] is None
+    assert body["生效指纹"] is None
 
 
 def test_unknown_category_is_400(client: TestClient) -> None:
     assert client.get("/api/factors", params={"category": "写字楼"}).status_code == 400
     assert client.get("/api/base-tables", params={"category": "写字楼"}).status_code == 400
+
+
+# ---------------------------------------------------------------- 版本管理
+
+
+def test_all_lists_seven_categories_with_flags(client: TestClient) -> None:
+    """基础表页手风琴的数据源：7 类别；导入的那类有 1 版且标 latest+active。"""
+    imported = _import(client, "办公")
+    body = client.get("/api/base-tables/all").json()
+    assert len(body["categories"]) == 7
+    office = next(c for c in body["categories"] if c["类别"] == "办公")
+    assert office["生效指纹"] == imported["base_table"]["指纹"]
+    assert len(office["versions"]) == 1
+    v = office["versions"][0]
+    assert v["latest"] is True and v["active"] is True
+    # 没导过的类别为空
+    empty = next(c for c in body["categories"] if c["类别"] == "工业")
+    assert empty["versions"] == [] and empty["生效指纹"] is None
+
+
+def test_set_active_requires_existing_fingerprint(client: TestClient) -> None:
+    imported = _import(client, "办公")
+    fp = imported["base_table"]["指纹"]
+    # 不存在的指纹 → 400
+    bad = client.post("/api/base-tables/active", json={"category": "办公", "fingerprint": "nope"})
+    assert bad.status_code == 400
+    # 存在的指纹 → 200，且写进生效版本
+    ok = client.post("/api/base-tables/active", json={"category": "办公", "fingerprint": fp})
+    assert ok.status_code == 200
+    assert ok.json()["生效指纹"] == fp
+    assert client.get("/api/base-tables", params={"category": "办公"}).json()["生效指纹"] == fp
+
+
+def test_set_active_unknown_category_400(client: TestClient) -> None:
+    resp = client.post("/api/base-tables/active", json={"category": "写字楼", "fingerprint": "x"})
+    assert resp.status_code == 400
+
+
+def test_pull_without_notable_configured_is_409(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """本地模式（没配多维表）拉取 → 409 明确提示，不崩。"""
+    for key in ("NOTABLE_BASETABLE_SHEET", "YIDA_APP_KEY", "YIDA_APP_SECRET",
+                "NOTABLE_BASE_ID", "NOTABLE_OPERATOR_ID"):
+        monkeypatch.delenv(key, raising=False)
+    resp = client.post("/api/base-tables/pull")
+    assert resp.status_code == 409
+    assert "多维表" in resp.json()["detail"]
