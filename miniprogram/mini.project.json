@@ -1,6 +1,6 @@
 {
   "miniprogramRoot": "./",
-  "compileType": "miniprogram",
+  "compileType": "mini",
   "component2": true,
   "setting": {
     "urlCheck": false,
