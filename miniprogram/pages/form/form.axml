@@ -26,6 +26,9 @@
 </view>
 
 <view class="card">
+  <view class="unsynced" a:if="{{dirty}}">● 有改动未同步，请提交</view>
+  <view class="synced" a:elif="{{serverStatus === '已提交'}}">✓ 已提交同步</view>
+  <view class="muted" a:elif="{{serverStatus === '草稿'}}">已暂存（草稿）</view>
   <button onTap="onSave">暂存</button>
   <button class="btn-primary" onTap="onSubmit">提交</button>
   <view class="muted" a:if="{{msg}}">{{msg}}</view>

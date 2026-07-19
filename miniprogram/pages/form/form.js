@@ -20,6 +20,8 @@ Page({
     fields: FIELDS, categories: CATEGORIES, catIndex: 0,
     form: { category: '', basic: {} },
     survey_id: '', gps: null, geo: {}, msg: '',
+    serverStatus: '',   // 载入/存过后的服务端状态：草稿 / 已提交
+    dirty: false,       // 载入后有本地改动、尚未暂存或提交
   },
 
   onLoad(q) {
@@ -34,22 +36,24 @@ Page({
         form: { category: d.category || '', basic: c.basic || {} },
         gps: c.gps || null,
         catIndex: Math.max(0, CATEGORIES.indexOf(d.category)),
+        serverStatus: d.status || '',
+        dirty: false,   // 刚载入，与服务端一致
       });
     }).catch((e) => this.setData({ msg: '载入草稿失败：' + e.detail }));
   },
 
   onCategory(e) {
     const cat = CATEGORIES[e.detail.value];
-    this.setData({ catIndex: e.detail.value, 'form.category': cat });
+    this.setData({ catIndex: e.detail.value, 'form.category': cat, dirty: true });
   },
   onField(e) {
-    this.setData({ ['form.basic.' + e.currentTarget.dataset.key]: e.detail.value });
+    this.setData({ ['form.basic.' + e.currentTarget.dataset.key]: e.detail.value, dirty: true });
   },
 
   onGeo() {
     dd.getLocation({
       success: (loc) => {
-        this.setData({ gps: { lat: loc.latitude, lng: loc.longitude } });
+        this.setData({ gps: { lat: loc.latitude, lng: loc.longitude }, dirty: true });
         broker.request('prefillGeo', { lng: loc.longitude, lat: loc.latitude }).then((f) => {
           const metro = f.nearest_metro;
           this.setData({ geo: {
@@ -85,7 +89,9 @@ Page({
     if (!this.data.form.category) { this.setData({ msg: '请先选类别' }); return; }
     broker.request('saveDraft', this._payload()).then((r) => {
       this.rememberLocal(r.survey_id);
-      this.setData({ survey_id: r.survey_id, msg: '已暂存：' + r.survey_id });
+      // 暂存写库后状态回落为“草稿”，本地已与服务端一致
+      this.setData({ survey_id: r.survey_id, serverStatus: '草稿', dirty: false,
+        msg: '已暂存：' + r.survey_id });
     }).catch((e) => this.setData({ msg: '暂存失败：' + e.detail }));
   },
 
@@ -97,7 +103,14 @@ Page({
       this.setData({ survey_id: r.survey_id });
       return broker.request('submit', { survey_id: r.survey_id });
     }).then(() => {
-      this.setData({ msg: '已提交，办公端可拉取。' });
+      this.setData({ serverStatus: '已提交', dirty: false, msg: '已提交，办公端可拉取。' });
+      dd.showToast({ content: '已提交同步', type: 'success', duration: 1500 });
+      // 稍候自动退回入口页（入口页 onShow 会刷新草稿列表，显示“已提交”）
+      setTimeout(() => {
+        const pages = (typeof getCurrentPages === 'function') ? getCurrentPages() : [];
+        if (pages.length > 1) dd.navigateBack();
+        else dd.reLaunch({ url: '/pages/index/index' });
+      }, 1200);
     }).catch((e) => this.setData({ msg: '提交失败：' + e.detail }));
   },
 

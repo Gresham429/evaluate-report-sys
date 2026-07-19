@@ -1,6 +1,12 @@
 const broker = require('../../utils/broker');
 const app = getApp();
 
+/** ISO 时间戳 → "MM-DD HH:mm"（列表展示用，去掉原始 T/毫秒/Z）。 */
+function fmtTime(s) {
+  const t = String(s || '');
+  return t.length >= 16 ? t.slice(5, 16).replace('T', ' ') : t;
+}
+
 Page({
   data: { filler: '', fillerName: '', authError: '', drafts: [] },
 
@@ -29,7 +35,8 @@ Page({
         const ids = res.data || [];
         Promise.all(ids.map((id) =>
           broker.request('loadDraft', { survey_id: id })
-            .then((d) => ({ survey_id: id, category: d.category, updated_at: d.updated_at }))
+            .then((d) => ({ survey_id: id, category: d.category,
+              status: d.status || '', updated_at: fmtTime(d.updated_at) }))
             .catch(() => null)
         )).then((rows) => this.setData({ drafts: rows.filter(Boolean) }));
       },
