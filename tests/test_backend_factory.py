@@ -12,6 +12,7 @@ from src.dingtalk.factory import (
     base_table_backend_for,
     instance_backend_for,
     ledger_backend_for,
+    notable_base_table_backend,
 )
 from src.knowledge_base.backend import LocalFileBaseTableBackend
 from src.knowledge_base.notable_backend import NotableBaseTableBackend
@@ -61,7 +62,25 @@ def test_notable_when_switched_and_configured(monkeypatch: pytest.MonkeyPatch) -
     p = Path("/tmp/x")
     assert isinstance(ledger_backend_for(p), NotableLedgerBackend)
     assert isinstance(instance_backend_for(p), NotableInstanceBackend)
-    assert isinstance(base_table_backend_for(p), NotableBaseTableBackend)
+    # D3：基础表存储恒本地，即便开关开、配置齐——多维表只作显式同步目标。
+    assert isinstance(base_table_backend_for(p), LocalFileBaseTableBackend)
+
+
+def test_base_table_always_local_even_switched(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D3：无论开关开关、配置齐否，基础表 store 后端恒本地。"""
+    assert isinstance(base_table_backend_for(Path("/tmp/x")), LocalFileBaseTableBackend)
+    _configure_full(monkeypatch)
+    assert isinstance(base_table_backend_for(Path("/tmp/x")), LocalFileBaseTableBackend)
+
+
+def test_notable_base_table_backend_ignores_switch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """同步用后端只看凭据+基础表 sheet，与 `承载后端` 开关无关。"""
+    assert notable_base_table_backend() is None  # 未配 → None
+    _configure_full(monkeypatch)
+    monkeypatch.delenv("承载后端", raising=False)  # 开关关也无妨
+    assert isinstance(notable_base_table_backend(), NotableBaseTableBackend)
+    monkeypatch.delenv("NOTABLE_BASETABLE_SHEET", raising=False)  # 缺 sheet → None
+    assert notable_base_table_backend() is None
 
 
 def test_switch_off_stays_local(monkeypatch: pytest.MonkeyPatch) -> None:

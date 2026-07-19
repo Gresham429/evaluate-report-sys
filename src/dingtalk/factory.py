@@ -16,7 +16,12 @@ from src.ledger.notable_backend import NotableLedgerBackend
 from src.library.backend import InstanceBackend, LocalFileInstanceBackend
 from src.library.notable_backend import NotableInstanceBackend
 
-__all__ = ["ledger_backend_for", "instance_backend_for", "base_table_backend_for"]
+__all__ = [
+    "ledger_backend_for",
+    "instance_backend_for",
+    "base_table_backend_for",
+    "notable_base_table_backend",
+]
 
 
 def ledger_backend_for(path: Path) -> LedgerBackend:
@@ -36,8 +41,22 @@ def instance_backend_for(path: Path) -> InstanceBackend:
 
 
 def base_table_backend_for(path: Path) -> BaseTableBackend:
-    if config.use_notable() and config.base_table_sheet():
-        client = config.build_client()
-        if client is not None:
-            return NotableBaseTableBackend(client, config.base_table_sheet())
+    # D3(2026-07-20)：基础表存储恒本地、与 `承载后端` 开关解耦。出报告须离线可用，
+    # live-read 多维表做不到；多维表只作**显式同步目标**（拉取/导入推送，见
+    # knowledge_base/sync.py），同步客户端走 notable_base_table_backend()。
+    # 台账/实例库仍随开关走（上面两个工厂不变）。
     return LocalFileBaseTableBackend(path)
+
+
+def notable_base_table_backend() -> NotableBaseTableBackend | None:
+    """基础表同步（拉取/推送）用的多维表后端：只需凭据 + 基础表 sheet，**与开关无关**。
+
+    缺凭据或未配 sheet → None（调用方据此提示"多维表未配/离线"）。
+    """
+    sheet = config.base_table_sheet()
+    if not sheet:
+        return None
+    client = config.build_client()
+    if client is None:
+        return None
+    return NotableBaseTableBackend(client, sheet)
