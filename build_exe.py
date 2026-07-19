@@ -49,6 +49,10 @@ def _build() -> int:
         "--onefile",
         "--name", APP_NAME,
         "--add-data", f"src/web/static{';' if sys.platform == 'win32' else ':'}src/web/static",
+        # 内置 7 张默认基础表（**只读随包**，非 data/）：首次运行本地空时铺进 data/基础表，
+        # 离线开箱即用；本地非空则跳过，升级不覆盖。见 __main__.main() 的 seed 调用。
+        "--add-data",
+        f"resources/默认基础表{';' if sys.platform == 'win32' else ':'}resources/默认基础表",
         # 只在 Windows 上隐藏控制台：交付 exe 双击不该弹出黑终端。隐藏后 stdout/
         # stderr 变 None，日志由 __main__._setup_logging() 接到 exe 旁的日志文件。
         # **仅限 win32**：--noconsole 在 macOS 上会打成 .app 包，本地验证的

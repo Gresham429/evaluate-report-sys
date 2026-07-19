@@ -26,7 +26,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["app_dir", "data_dir", "templates_dir", "copy_path", "is_frozen"]
+__all__ = ["app_dir", "data_dir", "templates_dir", "copy_path", "is_frozen", "bundled_dir"]
 
 # 仓库根：src/paths.py → src/ → 项目根
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -67,3 +67,14 @@ def copy_path() -> Path:
     只有放在包外才成立。
     """
     return app_dir() / "copy.yaml"
+
+
+def bundled_dir(*parts: str) -> Path:
+    """**随包只读**资源目录（如首次运行播种用的默认基础表）。
+
+    与 `app_dir()` 相反：那是"用户能改、要留住"的外置数据；这里是"随代码走、不该改"的
+    内置资源。冻结（onefile）时 PyInstaller 把 `--add-data` 解到 `sys._MEIPASS`，
+    退出即删——只读取、拷贝走，绝不往里写。非冻结时即仓库根。
+    """
+    base = Path(getattr(sys, "_MEIPASS", _REPO_ROOT))
+    return base.joinpath(*parts)

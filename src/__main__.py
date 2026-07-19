@@ -14,7 +14,9 @@ from typing import TextIO
 
 import uvicorn
 
-from src.paths import app_dir
+from src.knowledge_base.seed import seed_default_base_tables_if_empty
+from src.knowledge_base.store import DEFAULT_STORE_DIR
+from src.paths import app_dir, bundled_dir
 from src.web.app import create_app
 
 logger = logging.getLogger(__name__)
@@ -88,6 +90,9 @@ def _load_dotenv() -> None:
 def main() -> None:
     _setup_logging()
     _load_dotenv()
+    # 首次运行（本地基础表为空）铺内置的 7 张默认基础表，离线开箱即用；本地非空则跳过，
+    # 升级不覆盖估价师攒的版本。之后可在基础表页「从钉钉拉取」更新。
+    seed_default_base_tables_if_empty(DEFAULT_STORE_DIR, bundled_dir("resources", "默认基础表"))
     url = f"http://{HOST}:{PORT}/"
     logger.info("启动 %s", url)
     threading.Timer(1.0, lambda: webbrowser.open(url)).start()

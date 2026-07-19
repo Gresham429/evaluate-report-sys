@@ -132,3 +132,17 @@ def test_seed_skips_when_dest_has_ledger(tmp_path: Path) -> None:
 
 def test_seed_no_resources(tmp_path: Path) -> None:
     assert seed_default_base_tables_if_empty(tmp_path / "data", tmp_path / "nope") == 0
+
+
+def test_bundled_defaults_seed_and_load_all_seven(tmp_path: Path) -> None:
+    """守护打包内置的 7 张默认基础表：能播种、且每类都能载入（指纹自校验通过）。"""
+    from src.paths import bundled_dir
+
+    resources = bundled_dir("resources", "默认基础表")
+    assert resources.exists(), "resources/默认基础表 缺失——打包播种源没了"
+    dest = tmp_path / "基础表"
+    assert seed_default_base_tables_if_empty(dest, resources) >= 8  # 7 版 + 台账
+    store = BaseTableStore(dest)
+    for cat in Category:
+        assert store.current(cat) is not None, f"{cat.value} 缺默认基础表"
+        store.load(cat)  # 触发指纹自校验，坏了会 ValueError
