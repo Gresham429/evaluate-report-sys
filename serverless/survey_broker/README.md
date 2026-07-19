@@ -34,15 +34,27 @@
 - **不需要** openpyxl/fastapi/pyyaml 等——broker 不 import `src.questionnaire` 包（那条链会拖第三方进来）。
 - `requirements.txt` 为空（无第三方依赖）。
 
-保持 `from src.dingtalk.notable import NotableClient` 可解析：zip 里 `src/` 目录结构照原样，入口按 `serverless.survey_broker.handler.handler` 配。
+保持 `from src.dingtalk.notable import NotableClient` 可解析：zip 里 `serverless/`、`src/` 目录结构照原样。
+一键打包：`uv run python serverless/package.py` → 产 `serverless/dist/survey_broker_fc.zip`。
+
+### 两种入口，二选一（按 FC 创建函数时选的运行时）
+- **自定义运行时（Web Server 模式，推荐、已按此走）**：用 `server.py` 起一个标准库 HTTP Server。
+  - 启动命令：`python -m serverless.survey_broker.server`
+  - 监听端口：`9000`（`server.py` 读 `FC_SERVER_PORT`/`PORT`，缺省 9000，与控制台「监听端口」一致）
+  - 请求：`POST` body `{"action":"saveDraft|loadDraft|submit|prefillGeo","payload":{...}}` → JSON；`GET /` 健康检查回 200。
+  - 客户端在进程启动时建一次（`build_context`），warm 容器复用、token 缓存复用。
+- **官方运行时（事件函数）**：用 `handler.py::handler`，处理程序填 `serverless.survey_broker.handler.handler` + 挂 HTTP 触发器。
+  两个入口共用同一个纯 `dispatch`，逻辑一致，选一个即可。
 
 ## 部署前必做的真机校准（`待真机校准`/`待部署校准`）
 本包逻辑已用假 transport/假客户端全测（47 项绿），但**三处外部接口形状是按文档假定、未打真机**，部署时逐条核实：
 
 1. **钉钉更新记录端点**（`src/dingtalk/notable.py::update_record`）：现按 `PUT .../records` body `{records:[{id,fields}]}` 假定。对照钉钉多维表 OpenAPI 最新文档核实 method/URL/body，必要时改这一个方法（同承载层当初用 `tools/notable_backend_smoke.py` 打真库校准的做法，可加一个 update 冒烟）。
 2. **高德字段路径**（`amap.py`）：逆地理 `regeocode.formatted_address`、周边 `pois[].name/.type/.distance` 按高德文档常见形状假定。真机打一次，若字段名不同，同时改 `amap.py` 与 `tests/test_survey_broker_amap.py` 的 canned JSON（两边一起改）。POI type 里「公交站/地铁站」关键字匹配也按真返回微调。
-3. **FC 入口形状**（`handler.py::handler`）：现按「事件处理程序 + API-Gateway 代理风格 event/response」假定。对照阿里云 FC 3.0 文档核实触发器类型与 event/response 精确形状，改 `handler`（不影响 `dispatch`，它是纯函数、不碰协议层）。
-4. **token 缓存（性能）**：`handler` 现每次请求新建 `NotableClient`，warm 容器复用不到 token 缓存、每请求多换一次 token。部署时把客户端构造**提到模块级**（或懒加载单例），让 warm 容器复用 token。
+3. **FC 入口**：
+   - 走**自定义运行时 + `server.py`**（推荐）时，入口是标准 HTTP，无 event-shape 校准问题；只需在控制台把「启动命令」「监听端口」按上面填对、`GET /` 探活通即可。若 FC 注入的端口环境变量名不是 `FC_SERVER_PORT`，据真机改 `server.py` 那一行（已兜 `PORT` 与缺省 9000）。
+   - 走**官方运行时 + `handler.py`（事件函数）**时，event/response 形状按 API-Gateway 代理风格假定，须对照 FC 3.0 文档核实。
+4. **token 缓存**：`server.py` 已在进程启动建一次客户端（warm 容器复用）——此项对 server 模式已解决；仅 `handler.py` 事件函数模式每请求新建，那条路才需把客户端提到模块级。
 
 校准完各处删掉对应 `待校准` 注释。
 

@@ -21,6 +21,7 @@ FILES = [
     "serverless/survey_broker/store.py",
     "serverless/survey_broker/amap.py",
     "serverless/survey_broker/handler.py",
+    "serverless/survey_broker/server.py",
     "src/__init__.py",
     "src/dingtalk/__init__.py",
     "src/dingtalk/notable.py",
@@ -39,7 +40,9 @@ def main() -> None:
             archive.write(src, rel)
     print(f"打包完成：{out}")
     print(f"含 {len(FILES)} 个文件，零第三方依赖。")
-    print("FC 处理程序(入口)填：serverless.survey_broker.handler.handler")
+    print("FC 自定义运行时(Web Server 模式)：")
+    print("  启动命令 = python -m serverless.survey_broker.server")
+    print("  监听端口 = 9000")
 
 
 if __name__ == "__main__":
