@@ -5,8 +5,9 @@
 零网络、确定性；真机传默认的 urllib transport。真实端点形状以
 `tools/notable_backend_smoke.py` 打真库校准为准。
 
-只搬记录（list/insert），不提供 update/delete——台账只增不改（铁律 #4）由此天然满足；
-基础表旧版不覆盖、实例只增不删，都由上层后端用"存在才不写/按键 upsert"实现，客户端不设删改。
+记录读写含 `update_record`——**只给可变的「实勘问卷」表用**（草稿续填/提交改状态）；
+台账只增不改（铁律 #4）、基础表旧版不覆盖、实例只增不删，都由上层后端"不调 update"
+天然满足，客户端本身不做按表种类的强制拦截，靠调用侧约束。
 """
 
 import json
@@ -150,6 +151,13 @@ class NotableClient:
         if not ids:
             raise RuntimeError(f"多维表 {sheet} 写入未返回记录 id")
         return ids[0]
+
+    def update_record(self, sheet: str, record_id: str, fields: dict[str, Any]) -> None:
+        """更新一行字段（问卷草稿续填/提交改状态用）。**只给可变的实勘问卷表用**——
+        台账/实例/基础表后端一律不调它，「只增不改」由调用侧不使用来保证。
+        端点形状待真机校准（同 tools/notable_backend_smoke.py 打真库校准）。"""
+        url = self._records_url(sheet)  # PUT .../records，body {records:[{id, fields}]}
+        self._authed("PUT", url, {"records": [{"id": record_id, "fields": fields}]})
 
     def get_record(self, sheet: str, record_id: str) -> dict[str, Any]:
         """按记录 id 取一行（领号后回读自动编号用）。返回形如 {id, fields, ...}。"""

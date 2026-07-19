@@ -131,6 +131,40 @@ def test_get_record_reads_by_id() -> None:
     assert rec["fields"]["报告序号"] == 42
 
 
+def test_update_record_issues_put_with_records_body() -> None:
+    def transport(
+        method: str, url: str, headers: dict[str, str], body: bytes | None
+    ) -> tuple[int, str]:
+        if url.split("?", 1)[0] == TOKEN_URL:
+            return 200, json.dumps({"accessToken": "t", "expireIn": 7200})
+        if method == "PUT" and "/records" in url:
+            return 200, json.dumps({"value": [{"id": "rec1"}]})
+        return 404, "{}"
+
+    client = NotableClient("ak", "as", base_id="b", operator_id="o", transport=transport)
+    client.update_record("实勘问卷", "rec1", {"状态": "已提交"})
+
+
+def test_update_record_put_body_carries_id_and_fields() -> None:
+    seen: list[dict[str, Any]] = []
+
+    def transport(
+        method: str, url: str, headers: dict[str, str], body: bytes | None
+    ) -> tuple[int, str]:
+        if url.split("?", 1)[0] == TOKEN_URL:
+            return 200, json.dumps({"accessToken": "t", "expireIn": 7200})
+        if method == "PUT":
+            seen.append({"url": url, "body": json.loads(body) if body else None})
+            return 200, "{}"
+        return 404, "{}"
+
+    client = NotableClient("ak", "as", base_id="b", operator_id="o", transport=transport)
+    client.update_record("实勘问卷", "rec1", {"状态": "已提交"})
+    assert len(seen) == 1
+    assert seen[0]["url"].split("?", 1)[0].endswith("/sheets/实勘问卷/records")
+    assert seen[0]["body"] == {"records": [{"id": "rec1", "fields": {"状态": "已提交"}}]}
+
+
 def test_capacity_warning_near_free_limit(caplog: pytest.LogCaptureFixture) -> None:
     def big(method: str, url: str, headers: dict[str, str], body: bytes | None) -> tuple[int, str]:
         if url == TOKEN_URL:
