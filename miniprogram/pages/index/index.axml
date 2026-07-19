@@ -1,0 +1,17 @@
+<view class="card">
+  <view>填报人：{{fillerName || filler || '（免登中…）'}}</view>
+  <view class="muted" a:if="{{authError}}">免登失败：{{authError}}（可先新建，提交前重试）</view>
+</view>
+
+<view class="card">
+  <button class="btn-primary" onTap="onNew">新建实勘问卷</button>
+</view>
+
+<view class="card" a:if="{{drafts.length > 0}}">
+  <view>本机草稿（可续填）</view>
+  <view class="draft" a:for="{{drafts}}" key="{{item.survey_id}}" data-id="{{item.survey_id}}" onTap="onResume">
+    <text>{{item.category}} · {{item.updated_at}}</text>
+    <text class="muted">  {{item.survey_id}}</text>
+  </view>
+</view>
+<view class="card muted" a:else>本机还没有草稿。</view>
