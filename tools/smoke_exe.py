@@ -90,15 +90,8 @@ def _check_draft_lands_beside_the_exe(app_dir: Path) -> None:
 
     drafts = list((app_dir / "data" / "草稿").glob("*.json"))
     if not drafts:
-        # 趁进程还活着（_MEIPASS 未删）问它自己把路径解析成了啥——直指真凶。
-        try:
-            with urllib.request.urlopen(BASE + "/api/_diag", timeout=5) as r:
-                diag = r.read().decode("utf-8")
-        except (urllib.error.URLError, OSError) as exc:
-            diag = f"(取 /api/_diag 失败：{exc})"
         raise SystemExit(
             f"✗ 草稿没落在产物旁边（找的是 {app_dir / 'data' / '草稿'}）。\n"
-            f"  应用自报路径：{diag}\n"
             f"  冻结后 Path(__file__) 指向退出即删的临时目录——数据每次关闭会清零。\n"
             f"  见 src/paths.py。"
         )
@@ -128,11 +121,45 @@ def _check_report_renders(app_dir: Path) -> None:
     logger.info("③ 报告生成成功，%d 字节（templates/ 与 copy.yaml 都找得到）", len(payload))
 
 
+def _assert_port_free() -> None:
+    """开跑前确认 8765 没被占。
+
+    占着多半是上一次冒烟（如上一个 CI step）没杀干净的**孤儿服务器**：若不挡，本次
+    请求会全打到那台旧服务器上，把草稿写进它的目录，本次却在自己目录里找不到——
+    正是 Windows 上那次「草稿没落在产物旁边」的假失败。宁可在这里响亮地失败。
+    """
+    try:
+        urllib.request.urlopen(BASE + "/", timeout=2).close()
+    except (urllib.error.URLError, OSError):
+        return  # 连不上 = 端口空 = 正常
+    raise SystemExit(f"✗ {BASE} 已有服务在跑——疑上次冒烟残留的孤儿进程，先杀掉它再跑。")
+
+
+def _kill_tree(process: "subprocess.Popen[bytes]") -> None:
+    """杀掉整棵进程树。
+
+    Windows 上 PyInstaller onefile 的 exe 只是引导器，真正的服务器跑在它的**子进程**里。
+    `process.terminate()` 只杀引导器，子进程会变孤儿、继续占着 8765——下一个冒烟 step
+    就会连到这个孤儿，把结果算错。故 Windows 上必须 `taskkill /T` 连子进程一起杀。
+    """
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(process.pid)], capture_output=True, check=False
+        )
+    else:
+        process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+
+
 def main(exe: Path) -> int:
     if not exe.exists():
         raise SystemExit(f"✗ 产物不存在：{exe}")
     app_dir = exe.parent
 
+    _assert_port_free()  # 上次的孤儿服务器会让本次连错服务器、算错结果，先挡掉
     # 先清掉上一次冒烟留下的 data/，否则「草稿落在这里」可能是上次的残留。
     shutil.rmtree(app_dir / "data", ignore_errors=True)
 
@@ -145,11 +172,7 @@ def main(exe: Path) -> int:
         _check_draft_lands_beside_the_exe(app_dir)
         _check_report_renders(app_dir)
     finally:
-        process.terminate()
-        try:
-            process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            process.kill()
+        _kill_tree(process)  # 连子进程一起杀，别给下一个 step 留孤儿占端口
         shutil.rmtree(app_dir / "data", ignore_errors=True)
 
     logger.info("✓ 冒烟测试全过")
