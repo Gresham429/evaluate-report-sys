@@ -58,3 +58,19 @@ def test_levels_conditions_photos_passthrough() -> None:
     assert out["source"] == "questionnaire"
     assert out["questionnaire_id"] == "q-9"
     assert out["warnings"] == []
+
+
+def test_unit_labels_match_extract_contract() -> None:
+    # 与 /api/extract 同形状：界面据 单价单位/面积单位 标一览表表头。办公=房屋类。
+    out = survey_to_prefill(_resp())
+    assert out["单价单位"] == "元/㎡·天"
+    assert out["面积单位"] == "㎡"
+
+
+def test_unit_labels_empty_on_bad_category() -> None:
+    # 类别非法（草稿未填全）时退化空串，不炸预填。
+    import dataclasses
+
+    out = survey_to_prefill(dataclasses.replace(_resp(), category="不存在的类别"))
+    assert out["单价单位"] == ""
+    assert out["面积单位"] == ""

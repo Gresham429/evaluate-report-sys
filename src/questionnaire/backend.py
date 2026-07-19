@@ -60,6 +60,7 @@ def _fields_to_response(fields: dict[str, Any]) -> SurveyResponse:
     try:
         content = json.loads(raw)
     except (json.JSONDecodeError, TypeError) as exc:
+        logger.warning("问卷内容 JSON 解析失败（问卷ID=%s）：%s", fields.get(_ID), exc)
         raise ValueError(f"问卷内容 JSON 解析失败：{exc}") from exc
     if not isinstance(content, dict):
         raise ValueError("问卷内容不是对象")
