@@ -4,9 +4,9 @@ token 复用同一企业内部应用的 accessToken（由 `token_provider` 注�
 `NotableClient.access_token`）——免登和多维表读写是同一个应用，token 通用。
 transport 可注入（同 NotableClient 的 Transport 契约），单测零网络。
 
-**具体免登接口待真机校准**：现按「用 access_token 调 getuserinfo、body 带 code」
-假定（候选 topapi/v2/user/getuserinfo）。部署后打一次真机，据真实响应改
-`_URL` 与结果解析（result.userid / result.name）。
+免登接口 = `topapi/v2/user/getuserinfo`（access_token 调、body 带 code）——
+**2026-07-19 真机验通**：小程序 `dd.getAuthCode` → broker whoami → 换回真名，
+入口页「填报人」正确显示；假 code 回「不存在的临时授权码」。端点/解析无需再改。
 """
 
 import json
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["DingtalkIdentity", "IdentityTransport"]
 
-# 待真机校准：免登换 userid 的端点与请求形状
+# 免登换 userid 的端点（2026-07-19 真机验通，勿改）
 _URL = "https://oapi.dingtalk.com/topapi/v2/user/getuserinfo"
 
 # 同 NotableClient.Transport：(method, url, headers, body) -> (status, text)
