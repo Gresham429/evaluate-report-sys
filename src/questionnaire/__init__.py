@@ -8,6 +8,7 @@ from src.questionnaire.model import (
     known_basic_keys,
 )
 from src.questionnaire.prefill import survey_to_prefill
+from src.questionnaire.validation import validate_survey
 
 __all__ = [
     "STATUS_DRAFT",
@@ -16,4 +17,5 @@ __all__ = [
     "SurveyResponse",
     "known_basic_keys",
     "survey_to_prefill",
+    "validate_survey",
 ]

@@ -7,6 +7,7 @@
 
 from src.extractor.field_map import SURVEY_FIELDS
 from src.questionnaire.model import SurveyResponse
+from src.questionnaire.validation import validate_survey
 
 __all__ = ["survey_to_prefill"]
 
@@ -49,7 +50,7 @@ def survey_to_prefill(response: SurveyResponse) -> dict[str, object]:
         "subject_levels": dict(response.subject_levels),
         "asset_conditions": dict(response.asset_conditions),
         "photos": list(response.photos),
-        "warnings": [],
+        "warnings": [{"code": w.code, "message": w.message} for w in validate_survey(response)],
         "source": "questionnaire",
         "questionnaire_id": response.问卷ID,
     }
