@@ -44,6 +44,8 @@ from src.engine.methods import get_method
 from src.engine.methods.base import Instance, Result
 from src.extractor.condition import GROUP_PREFIXES, read_survey_conditions
 from src.extractor.project import load_project
+from src.questionnaire.backend import SurveyPullBackend
+from src.questionnaire.prefill import survey_to_prefill
 from src.knowledge_base.store import (
     DEFAULT_STORE_DIR as DEFAULT_BASE_TABLE_DIR,
 )
@@ -487,6 +489,24 @@ def _build_ledger_entry(project: Project, raw: dict[str, Any] | None) -> LedgerE
     )
 
 
+def _survey_backend() -> SurveyPullBackend:
+    """按 env 造「实勘问卷」表读取后端；未接入多维表或配置不全则抛 409。
+
+    问卷源只存在于多维表——本地模式没有问卷可拉，故显式挡回而非静默返回空。
+    """
+    if not config.use_notable():
+        raise HTTPException(
+            status_code=409, detail="实勘问卷拉取需 承载后端=多维表（本地模式无问卷源）"
+        )
+    client = config.build_client()
+    sheet = config.survey_sheet()
+    if client is None or not sheet:
+        raise HTTPException(
+            status_code=409, detail="多维表凭据或 NOTABLE_SURVEY_SHEET 未配全，检查 .env"
+        )
+    return SurveyPullBackend(client, sheet)
+
+
 def create_app() -> FastAPI:
     """构建 FastAPI 应用。"""
     app = FastAPI(title="房地产估价报告生成系统", docs_url=None, redoc_url=None)
@@ -876,6 +896,27 @@ def create_app() -> FastAPI:
             "单价单位": price_unit(project.category),
             "面积单位": area_unit(project.category),
         }
+
+    @app.get("/api/survey/list")
+    def survey_list() -> dict[str, object]:
+        """列出多维表「实勘问卷」表里所有「已提交」的问卷（办公端拉取用）。"""
+        backend = _survey_backend()
+        return {"surveys": [asdict(i) for i in backend.list_submitted()]}
+
+    @app.get("/api/survey/pull")
+    def survey_pull(id: str) -> dict[str, object]:
+        """拉取一份「已提交」问卷，返回与 /api/extract 同形状的预填 payload。
+
+        估价师据此免二次录入；比较法输出留空，仍由其选实例后重算（铁律 #7）。
+        """
+        backend = _survey_backend()
+        try:
+            response = backend.load(id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return survey_to_prefill(response)
 
     @app.get("/api/factors")
     def factors(category: str, fingerprint: str | None = None) -> dict[str, object]:

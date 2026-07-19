@@ -15,6 +15,7 @@ __all__ = [
     "ledger_sheet",
     "instance_sheet",
     "base_table_sheet",
+    "survey_sheet",
 ]
 
 _SWITCH = "承载后端"
@@ -56,3 +57,8 @@ def instance_sheet() -> str:
 def base_table_sheet() -> str:
     """基础表版本表的 sheetId/表名（NOTABLE_BASETABLE_SHEET）。"""
     return os.environ.get("NOTABLE_BASETABLE_SHEET", "").strip()
+
+
+def survey_sheet() -> str:
+    """实勘问卷表的 sheetId/表名（NOTABLE_SURVEY_SHEET）。办公端拉取已提交问卷用。"""
+    return os.environ.get("NOTABLE_SURVEY_SHEET", "").strip()
