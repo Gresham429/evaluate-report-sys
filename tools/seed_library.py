@@ -1,8 +1,9 @@
-"""开发期工具：从三份实勘表 Excel 批量种子导入实例库。
+"""开发期工具：从实勘表 Excel 批量种子导入实例库。
 
-三份素材（农用/办公/商业各一份实勘表、比较法.xlsx）共可抽出 9 条种子实例。
-写入 `data/实例库.json`；重复运行不会重复写入——已存在的编号原样跳过
-（`InstanceStore.add` 的既有语义，见 src/library/store.py）。
+只种**有真实案例**的四类（农用/办公/商业/住宅）。工业/停车场用地/建设用地的实勘表
+是**构造样例**（成交价 1.23/1.24/1.25、位置/面积皆空的占位假数据），不是真实例，
+故排除——它们的实例待真实案例到手再补。写入 `data/实例库.json`；重复运行不会重复写入
+（已存在的编号原样跳过，`InstanceStore.add` 的既有语义，见 src/library/store.py）。
 
 用法：
     uv run python tools/seed_library.py
@@ -21,10 +22,12 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
 
 MATERIALS = Path(__file__).resolve().parents[2] / "案例素材"
+# 仅有真实案例的四类。工业/停车场用地/建设用地的实勘表是构造样例（占位假数据），故不种。
 SOURCES: dict[str, Path] = {
     "农用": MATERIALS / "农用" / "农用地实勘表、比较法.xlsx",
     "办公": MATERIALS / "办公" / "办公实勘表、比较法.xlsx",
     "商业": MATERIALS / "商业" / "商业实勘表、比较法.xlsx",
+    "住宅": MATERIALS / "住宅" / "住宅实勘表、比较法.xlsx",
 }
 
 
