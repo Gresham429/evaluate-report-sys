@@ -155,7 +155,7 @@ class NotableClient:
     def update_record(self, sheet: str, record_id: str, fields: dict[str, Any]) -> None:
         """更新一行字段（问卷草稿续填/提交改状态用）。**只给可变的实勘问卷表用**——
         台账/实例/基础表后端一律不调它，「只增不改」由调用侧不使用来保证。
-        端点形状待真机校准（同 tools/notable_backend_smoke.py 打真库校准）。"""
+        端点形状 2026-07-19 真机验通（serverless broker submit 打真库，状态 草稿→已提交 成功）。"""
         url = self._records_url(sheet)  # PUT .../records，body {records:[{id, fields}]}
         self._authed("PUT", url, {"records": [{"id": record_id, "fields": fields}]})
 

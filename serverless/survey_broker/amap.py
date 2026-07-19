@@ -109,8 +109,10 @@ class AmapClient:
     def _poi_facts(around: dict[str, Any]) -> dict[str, Any]:
         """周边搜索响应 → bus_stops / nearest_metro / facilities（新 dict，不改入参）。
 
-        待真机校准：字段路径按高德周边搜索文档的常见形状假定——
-          pois[].name / .type（含"公交站"/"地铁站"关键字）/ .distance（米，字符串）。
+        真机已校准（2026-07-19 打杭州东站）：高德实际的名字/类型是「XX公交车站」
+        「地铁E口(1/4号线)」「交通设施服务;地铁站」这类，故关键字放宽到「公交」「地铁」
+        才抓得住（卡死成「公交站/地铁站」会把地铁口漏进 facilities）。字段路径
+        pois[].name / .type / .distance（米，字符串）实测无误。
         """
         pois = around.get("pois") or []
         bus_stops: list[str] = []
@@ -124,10 +126,10 @@ class AmapClient:
             poi_type = str(poi.get("type") or "")
             if not name:
                 continue
-            if "公交站" in poi_type or "公交站" in name:
+            if "公交" in poi_type or "公交" in name:
                 bus_stops.append(name)
                 continue
-            if "地铁站" in poi_type or "地铁站" in name:
+            if "地铁" in poi_type or "地铁" in name:
                 try:
                     distance = float(poi.get("distance") or 0)
                 except (TypeError, ValueError):

@@ -98,3 +98,21 @@ def test_metro_with_unparsable_distance_kept_as_facility() -> None:
     facts = client.prefill_geo(120.0, 30.0)
     assert facts["nearest_metro"] is None
     assert "坏距离地铁站" in facts["facilities"]
+
+
+def test_transit_matched_by_broad_keywords() -> None:
+    # 真机校准(杭州东站)：高德用「公交车站」「地铁E口」，关键词放宽到「公交」「地铁」才抓得住
+    def transport(url: str) -> tuple[int, str]:
+        if "regeo" in url:
+            return 200, json.dumps({"status": "1", "regeocode": {"formatted_address": "某地"}})
+        return 200, _around_response([
+            {"name": "东站公交车站", "type": "交通设施服务;公交车站", "distance": "60"},
+            {"name": "地铁E口(1/4号线)", "type": "交通设施服务;地铁站", "distance": "120"},
+            {"name": "星巴克", "type": "餐饮服务;咖啡厅", "distance": "40"},
+        ])
+
+    client = AmapClient("k", transport=transport)
+    facts = client.prefill_geo(120.0, 30.0)
+    assert facts["bus_stops"] == ["东站公交车站"]
+    assert facts["nearest_metro"] == {"name": "地铁E口(1/4号线)", "distance_m": 120.0}
+    assert facts["facilities"] == ["星巴克"]

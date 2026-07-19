@@ -46,15 +46,17 @@
 - **官方运行时（事件函数）**：用 `handler.py::handler`，处理程序填 `serverless.survey_broker.handler.handler` + 挂 HTTP 触发器。
   两个入口共用同一个纯 `dispatch`，逻辑一致，选一个即可。
 
-## 部署前必做的真机校准（`待真机校准`/`待部署校准`）
-本包逻辑已用假 transport/假客户端全测（47 项绿），但**三处外部接口形状是按文档假定、未打真机**，部署时逐条核实：
+## 真机校准状态（2026-07-19 打线上 FC 全部验通 ✅）
+本包逻辑先用假 transport/假客户端全测，三处外部接口形状随后**已在线上 FC 真机验通**：
 
-1. **钉钉更新记录端点**（`src/dingtalk/notable.py::update_record`）：现按 `PUT .../records` body `{records:[{id,fields}]}` 假定。对照钉钉多维表 OpenAPI 最新文档核实 method/URL/body，必要时改这一个方法（同承载层当初用 `tools/notable_backend_smoke.py` 打真库校准的做法，可加一个 update 冒烟）。
-2. **高德字段路径**（`amap.py`）：逆地理 `regeocode.formatted_address`、周边 `pois[].name/.type/.distance` 按高德文档常见形状假定。真机打一次，若字段名不同，同时改 `amap.py` 与 `tests/test_survey_broker_amap.py` 的 canned JSON（两边一起改）。POI type 里「公交站/地铁站」关键字匹配也按真返回微调。
-3. **FC 入口**：
-   - 走**自定义运行时 + `server.py`**（推荐）时，入口是标准 HTTP，无 event-shape 校准问题；只需在控制台把「启动命令」「监听端口」按上面填对、`GET /` 探活通即可。若 FC 注入的端口环境变量名不是 `FC_SERVER_PORT`，据真机改 `server.py` 那一行（已兜 `PORT` 与缺省 9000）。
-   - 走**官方运行时 + `handler.py`（事件函数）**时，event/response 形状按 API-Gateway 代理风格假定，须对照 FC 3.0 文档核实。
-4. **token 缓存**：`server.py` 已在进程启动建一次客户端（warm 容器复用）——此项对 server 模式已解决；仅 `handler.py` 事件函数模式每请求新建，那条路才需把客户端提到模块级。
+1. ✅ **钉钉换 token / 读 / 写 / 更新**：`loadDraft`/`saveDraft`/`submit` 打真库全 200；`update_record`（`PUT .../records` body `{records:[{id,fields}]}`）经 `submit` 把状态 草稿→已提交 成功——端点形状正确。
+2. ✅ **高德**：逆地理 `regeocode.formatted_address`、周边 `pois[].name/.type/.distance` 实测无误。POI 分类关键字**已按真机放宽**为「公交」「地铁」（高德实际是「XX公交车站」「地铁E口(1/4号线)」，卡死「公交站/地铁站」会漏）。
+3. ✅ **FC 入口**：自定义运行时 + `server.py`，`GET /` 探活 200、`python3 -m serverless.survey_broker.server` + 端口 9000 起服正常。
+4. ✅ **token 缓存**：`server.py` 进程启动建一次客户端，warm 容器复用。
+
+> 走官方运行时 + `handler.py`（事件函数，本项目未用）那条路，event/response 形状仍按 API-Gateway 代理风格假定、未真机验。
+
+**上线前仍要做的一件事（非校准，是鉴权）**：给 broker 加钉钉 authCode 校验（现触发器 anonymous、接口开放），见项目待办。
 
 校准完各处删掉对应 `待校准` 注释。
 
