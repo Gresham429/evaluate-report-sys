@@ -1,0 +1,3 @@
+.row { display: flex; align-items: center; padding: 12rpx 0; }
+.label { width: 200rpx; color: #555; }
+.inp, .pick { flex: 1; border: 1rpx solid #ddd; border-radius: 6rpx; padding: 10rpx; }

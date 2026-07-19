@@ -1,0 +1,32 @@
+<view class="card">
+  <view class="row">
+    <text class="label">类别</text>
+    <picker onChange="onCategory" data-key="category" range="{{categories}}" value="{{catIndex}}">
+      <view class="pick">{{form.category || '请选择'}}</view>
+    </picker>
+  </view>
+</view>
+
+<view class="card">
+  <view class="row" a:for="{{fields}}" key="{{item.key}}">
+    <text class="label">{{item.label}}</text>
+    <input class="inp" value="{{form.basic[item.key]}}" data-key="{{item.key}}" onInput="onField" placeholder="填写" />
+  </view>
+</view>
+
+<view class="card">
+  <button class="btn-primary" onTap="onGeo">地图预填地理事实</button>
+  <view a:if="{{geo.address}}">
+    <view>地址：{{geo.address}}</view>
+    <view class="muted">公交：{{geo.bus_stops}}</view>
+    <view class="muted">最近地铁：{{geo.metroText}}</view>
+    <view class="muted">周边：{{geo.facilities}}</view>
+  </view>
+  <view class="muted">仅供参考，档次由估价师判断（本版不采档次）。</view>
+</view>
+
+<view class="card">
+  <button onTap="onSave">暂存</button>
+  <button class="btn-primary" onTap="onSubmit">提交</button>
+  <view class="muted" a:if="{{msg}}">{{msg}}</view>
+</view>
