@@ -1,0 +1,35 @@
+<view class="card">
+  <view>现场采集（拍照 + 定位）</view>
+  <view class="muted">照片先存本机，联网自动补传；地理事实仅供参考，档次由估价师判断。</view>
+</view>
+
+<view class="card">
+  <button class="btn-primary" onTap="onChoose">拍照 / 选图</button>
+  <view class="grid">
+    <view class="thumb" a:for="{{photos}}" key="p{{index}}">
+      <image class="img" src="{{item}}" mode="aspectFill" />
+      <view class="del" data-i="{{index}}" onTap="onDelPhoto">×</view>
+      <view class="tag ok">已传</view>
+    </view>
+    <view class="thumb" a:for="{{pending}}" key="q{{index}}">
+      <image class="img" src="{{item.path}}" mode="aspectFill" />
+      <view class="del" data-i="{{index}}" onTap="onDelPending">×</view>
+      <view class="tag wait">待传</view>
+    </view>
+  </view>
+</view>
+
+<view class="card">
+  <button class="btn-primary" onTap="onGeo">地图预填地理事实</button>
+  <view a:if="{{geo.address}}">
+    <view>地址：{{geo.address}}</view>
+    <view class="muted">公交：{{geo.bus_stops}}</view>
+    <view class="muted">最近地铁：{{geo.metroText}}</view>
+    <view class="muted">周边：{{geo.facilities}}</view>
+  </view>
+</view>
+
+<view class="card">
+  <button class="btn-primary" onTap="onDone">完成，返回表单</button>
+  <view class="muted" a:if="{{msg}}">{{msg}}</view>
+</view>

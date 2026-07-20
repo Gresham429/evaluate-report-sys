@@ -1,5 +1,6 @@
 const broker = require('../../utils/broker');
 const store = require('../../utils/store');
+const sync = require('../../utils/sync');
 const app = getApp();
 
 /** ISO 时间戳 → "MM-DD HH:mm"（列表展示用，去掉原始 T/毫秒/Z）。 */
@@ -12,7 +13,7 @@ Page({
   data: { filler: '', fillerName: '', authError: '', drafts: [] },
 
   onLoad() { this.auth(); },
-  onShow() { this.loadMyDrafts(); },
+  onShow() { sync.flush(broker, store); this.loadMyDrafts(); },
 
   auth() {
     dd.getAuthCode({

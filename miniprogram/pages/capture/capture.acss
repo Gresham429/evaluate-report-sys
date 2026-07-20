@@ -1,0 +1,8 @@
+.grid { display: flex; flex-wrap: wrap; margin-top: 12rpx; }
+.thumb { position: relative; width: 200rpx; height: 200rpx; margin: 8rpx; }
+.img { width: 100%; height: 100%; border-radius: 8rpx; background: #eee; }
+.del { position: absolute; top: -10rpx; right: -10rpx; width: 40rpx; height: 40rpx;
+  line-height: 40rpx; text-align: center; background: rgba(0,0,0,.55); color: #fff; border-radius: 50%; }
+.tag { position: absolute; left: 4rpx; bottom: 4rpx; font-size: 20rpx; padding: 2rpx 8rpx; border-radius: 6rpx; color: #fff; }
+.tag.ok { background: #1a7f37; }
+.tag.wait { background: #d4700a; }

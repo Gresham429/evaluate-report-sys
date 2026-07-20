@@ -94,6 +94,7 @@ function saveDraftLocal(draft) {
       status: draft.status || '草稿',
       updatedAt: draft.updatedAt || '',
       dirty: !!draft.dirty,
+      needsSync: !!draft.needsSync,
       submitted: draft.status === '已提交',
     });
   }).then(function () { return draft; });
@@ -160,6 +161,14 @@ function reconcileFromServer(rows) {
   });
 }
 
+/** 待自动补传的草稿索引条：用户点过暂存/提交但没成功（needsSync）、且未提交完成。
+ *  只认 needsSync——填了一半没点保存的草稿（dirty 但 needsSync 假）不会被自动推上服务端。 */
+function listPending() {
+  return readIndex().then(function (list) {
+    return list.filter(function (e) { return e.needsSync && !e.submitted; });
+  });
+}
+
 /** 首次运行迁移：索引为空但有 v1 的 myDrafts，则据此种一份索引（内容仍靠服务端）。 */
 function migrateLegacy() {
   return readIndex().then(function (list) {
@@ -186,4 +195,5 @@ module.exports = {
   saveDraftLocal: saveDraftLocal, loadDraftLocal: loadDraftLocal,
   attachServerId: attachServerId, clearDraftContent: clearDraftContent,
   reconcileFromServer: reconcileFromServer, migrateLegacy: migrateLegacy,
+  listPending: listPending,
 };

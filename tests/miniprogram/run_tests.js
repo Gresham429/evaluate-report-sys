@@ -16,9 +16,14 @@ function eq(a, b, msg) { ok(JSON.stringify(a) === JSON.stringify(b), msg + ` (go
 
 // ---- server 打桩 ----
 function makeServer() {
-  const state = { seq: 0, drafts: {} };
+  const state = { seq: 0, drafts: {}, uploads: 0 };
   function route(req) {
     const a = req.action, p = req.payload || {};
+    if (a === 'uploadPhoto') {
+      state.uploads++;
+      return { url: 'https://dl/' + (p.name || 'x') + '?len=' + String(p.dataBase64 || '').length,
+        name: p.name };
+    }
     if (a === 'saveDraft') {
       const sid = p.survey_id || ('srv-' + (++state.seq));
       state.drafts[sid] = { category: p.category, content: clone(p.content),
@@ -50,6 +55,13 @@ function installEnv(server) {
     setStorage: ({ key, data, success }) => { kv[key] = clone(data); success && success(); },
     removeStorage: ({ key, success }) => { delete kv[key]; success && success(); },
     getLocation: ({ success }) => success({ latitude: 30.25, longitude: 120.21 }),
+    chooseImage: ({ count, success }) =>
+      success({ filePaths: ['/t/a.jpg', '/t/b.jpg'].slice(0, count || 9) }),
+    compressImage: ({ apFilePaths, success }) => success({ apFilePaths }),
+    getFileSystemManager: () => ({
+      readFile: ({ filePath, success }) => success({ data: 'B64(' + filePath + ')' }),
+    }),
+    onNetworkStatusChange: () => {},
     showToast: (o) => env.spies.toast.push(o),
     navigateBack: () => { env.spies.navBack++; },
     reLaunch: (o) => env.spies.reLaunch.push(o),
@@ -93,11 +105,14 @@ function makePage(cfg) {
 const server = makeServer();
 let env = installEnv(server);
 const store = require(path.join(__dirname, '../../miniprogram/utils/store.js'));
-require(path.join(__dirname, '../../miniprogram/utils/broker.js'));
+const sync = require(path.join(__dirname, '../../miniprogram/utils/sync.js'));
+const broker = require(path.join(__dirname, '../../miniprogram/utils/broker.js'));
 require(path.join(__dirname, '../../miniprogram/pages/form/form.js'));
 const formCfg = lastCfg;
 require(path.join(__dirname, '../../miniprogram/pages/index/index.js'));
 const indexCfg = lastCfg;
+require(path.join(__dirname, '../../miniprogram/pages/capture/capture.js'));
+const captureCfg = lastCfg;
 
 function resetEnv() { env = installEnv(server); server.state.seq = 0; server.state.drafts = {}; }
 
@@ -224,6 +239,96 @@ async function main() {
   await tick();
   eq(ix2.data.drafts.length, 1, 'C2 离线仍从本地渲染');
   eq(ix2.data.drafts[0].status, '草稿', 'C2 离线保留本地状态');
+
+  // ===== D. 在线拍照走全链路（form → capture → 提交带照片）=====
+  console.log('D. 在线拍照 + 现场采集页');
+  resetEnv();
+  const fpD = makePage(formCfg);
+  fpD.onLoad({});
+  const lidD = fpD.data.localId;
+  fpD.onCategory({ detail: { value: 2 } });   // 商业
+  await tick();
+  fpD.onCapture();
+  await tick();
+  ok(env.spies.navTo.length >= 1, 'D0 表单跳现场采集页');
+  const capD = makePage(captureCfg);
+  capD.onLoad({ draftId: lidD });
+  await tick();
+  eq(capD.data.form ? 0 : capD.data.localId === lidD, true, 'D1 采集页载入同一 localId');
+  capD.onChoose();
+  await tick();
+  eq(capD.data.photos.length, 2, 'D1 在线拍 2 张即上传得 2 URL');
+  eq(capD.data.pending.length, 0, 'D1 无待传');
+  capD.onDone();
+  await tick();
+  fpD.onShow();
+  await tick();
+  eq(fpD.data.photos.length, 2, 'D2 返回表单 onShow 拉到 2 张照片');
+  fpD.onSubmit();
+  await tick();
+  const dSubmitted = Object.keys(server.state.drafts).map((k) => server.state.drafts[k])
+    .find((x) => x.status === '已提交');
+  eq((dSubmitted.content.photos || []).length, 2, 'D2 提交后服务端 content.photos 含 2 URL');
+
+  // ===== E. 离线拍照 + 离线提交 → 联网自动补传并提交 =====
+  console.log('E. 离线采集 + 联网自动补传');
+  resetEnv();
+  const fpE = makePage(formCfg);
+  fpE.onLoad({});
+  const lidE = fpE.data.localId;
+  fpE.onCategory({ detail: { value: 0 } });   // 农用
+  await tick();
+  env.offline = true;
+  const capE = makePage(captureCfg);
+  capE.onLoad({ draftId: lidE });
+  await tick();
+  capE.onChoose();          // 离线：上传失败入待传
+  await tick();
+  eq(capE.data.pending.length, 2, 'E1 离线拍照入待传队列（不丢）');
+  eq(capE.data.photos.length, 0, 'E1 离线未产生已传 URL');
+  capE.onDone();
+  await tick();
+  fpE.onShow();             // onShow 会触发 flush，但此时离线且 needsSync 假 → 不推
+  await tick();
+  fpE.onSubmit();           // 离线提交 → needsSync/pendingSubmit 置真，本机留
+  await tick();
+  ok(fpE.data.offline === true, 'E2 离线提交 → offline');
+  let pend = await store.listPending();
+  eq(pend.length, 1, 'E2 有一条待补传（needsSync）');
+  // 联网 → flush 自动补传照片 + 暂存 + 提交
+  env.offline = false;
+  const outE = await sync.flush(broker, store);
+  await tick();
+  eq(outE.submitted, 1, 'E3 联网 flush 自动提交 1 条');
+  const eSubmitted = Object.keys(server.state.drafts).map((k) => server.state.drafts[k])
+    .find((x) => x.status === '已提交');
+  eq((eSubmitted.content.photos || []).length, 2, 'E3 补传后服务端含 2 照片 URL');
+  const eLocal = await store.loadDraftLocal(lidE);
+  ok(eLocal === null, 'E3 提交成功清本地重内容');
+  pend = await store.listPending();
+  eq(pend.length, 0, 'E3 待补传清空');
+
+  // ===== F. flush 幂等 / 重入锁 / 不重复上传 =====
+  console.log('F. flush 幂等 + 重入锁');
+  resetEnv();
+  await store.saveDraftLocal({ id: 'lf', category: '住宅', filler: 'u1', basic: { a: '1' },
+    photos: [], pendingPhotos: [{ name: 'p1.jpg', dataBase64: 'BB' }],
+    updatedAt: 't', status: '草稿', dirty: true, needsSync: true, pendingSubmit: false });
+  const beforeUploads = server.state.uploads;
+  const pF1 = sync.flush(broker, store);
+  const pF2 = sync.flush(broker, store);   // 立即再调 → 应被重入锁挡下
+  const [r1, r2] = await Promise.all([pF1, pF2]);
+  await tick();
+  ok(r2.skipped === true, 'F1 并发第二次 flush 被重入锁跳过');
+  eq(r1.synced, 1, 'F1 首次 flush 同步 1 条');
+  eq(server.state.uploads - beforeUploads, 1, 'F1 待传照片只上传一次');
+  // 再 flush（照片已转 photos，pendingPhotos 空）→ 不再重传
+  const u2 = server.state.uploads;
+  const draftF = await store.loadDraftLocal('lf');
+  eq((draftF.photos || []).length, 1, 'F2 照片已转入 photos');
+  eq((draftF.pendingPhotos || []).length, 0, 'F2 pendingPhotos 已空');
+  await sync.flush(broker, store);   // lf 已 needsSync=false → listPending 不含它
+  eq(server.state.uploads - u2, 0, 'F2 重跑不重传照片');
 
   console.log(`\n结果：${PASS} 通过，${FAIL} 失败`);
   process.exit(FAIL ? 1 : 0);
