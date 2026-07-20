@@ -3,12 +3,40 @@ const store = require('../../utils/store');
 const FACTORS = require('../../factors');
 
 // 地图地理事实 → 区位因素描述的关键字映射（只把事实填进对应因素的「描述」，
-// 档次仍由估价师手选下拉，铁律 #7）。
+// 档次仍由估价师手选下拉，铁律 #7）。顺序＝匹配优先级（具体在前）。
 const GEO_MAP = [
   { kw: '地铁', pick: (geo) => geo.metroText },
   { kw: '公交', pick: (geo) => geo.bus_stops },
   { kw: '公共服务设施', pick: (geo) => geo.facilities },
+  { kw: '高速', pick: (geo) => geo.highwayText },
+  { kw: '城中心', pick: (geo) => geo.centerText },
+  { kw: '重要场所', pick: (geo) => geo.centerText },
+  { kw: '停车', pick: (geo) => geo.parkingText },
+  { kw: '道路', pick: (geo) => geo.roadsText },
+  { kw: '临路', pick: (geo) => geo.roadsText },
 ];
+
+/** 米 → 「约X.X公里 / 约X米」。 */
+function _dist(m) {
+  const n = Number(m) || 0;
+  return n >= 1000 ? ('约' + (Math.round(n / 100) / 10) + '公里') : ('约' + Math.round(n) + '米');
+}
+
+/** 高德 facts → 展示/预填用的文字字段。 */
+function _geoTexts(f) {
+  const metro = f.nearest_metro, hw = f.highway, ctr = f.center, pk = f.parking;
+  return {
+    address: f.address,
+    bus_stops: (f.bus_stops || []).join('、') || '（无）',
+    facilities: (f.facilities || []).slice(0, 6).join('、'),
+    metroText: metro ? (metro.name + ' ' + _dist(metro.distance_m)) : '（无）',
+    highwayText: hw ? (hw.name + ' ' + _dist(hw.distance_m)) : '',
+    centerText: ctr ? (ctr.name + ' ' + _dist(ctr.distance_m)) : '',
+    parkingText: pk ? ('周边约' + pk.count + '个停车场'
+      + (pk.nearest_m ? ('，最近' + _dist(pk.nearest_m)) : '')) : '',
+    roadsText: (f.roads && f.roads.length) ? ('临近：' + f.roads.join('、')) : '',
+  };
+}
 
 // 逐因素采集：按类别渲染各因素「描述(自由文字)+档次(下拉，取自基础表)」+ 地图预填。
 // 描述→content.asset_conditions[因素名]；档次→content.subject_levels[因素名]；键对齐办公端。
@@ -60,13 +88,7 @@ Page({
       success: (loc) => {
         this.setData({ gps: { lat: loc.latitude, lng: loc.longitude } });
         broker.request('prefillGeo', { lng: loc.longitude, lat: loc.latitude }).then((f) => {
-          const metro = f.nearest_metro;
-          const geo = {
-            address: f.address,
-            bus_stops: (f.bus_stops || []).join('、') || '（无）',
-            facilities: (f.facilities || []).slice(0, 6).join('、'),
-            metroText: metro ? (metro.name + ' 约' + metro.distance_m + '米') : '（无）',
-          };
+          const geo = _geoTexts(f);
           this.setData({ geo });
           this._prefillFromGeo(geo);
           this._persist();

@@ -8,6 +8,10 @@
     <view>地址：{{geo.address}}</view>
     <view class="muted">公交：{{geo.bus_stops}}</view>
     <view class="muted">最近地铁：{{geo.metroText}}</view>
+    <view class="muted" a:if="{{geo.centerText}}">行政中心：{{geo.centerText}}</view>
+    <view class="muted" a:if="{{geo.highwayText}}">最近高速口：{{geo.highwayText}}</view>
+    <view class="muted" a:if="{{geo.parkingText}}">停车场：{{geo.parkingText}}</view>
+    <view class="muted" a:if="{{geo.roadsText}}">{{geo.roadsText}}</view>
     <view class="muted">周边：{{geo.facilities}}</view>
   </view>
   <view class="muted">已自动填入对应区位因素的描述（只填空、可改）；档次仍由你判断。</view>

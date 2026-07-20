@@ -5,13 +5,23 @@ canned 响应里的字段路径与 `amap.py` 里 `# 待真机校准` 的假设�
 """
 
 import json
+import urllib.parse
 from typing import Any
 
 from serverless.survey_broker.amap import AmapClient
 
+# prefill_geo 失败/空时的规范返回形状（与 amap._empty_facts 对齐）
+_EMPTY = {
+    "address": "", "bus_stops": [], "nearest_metro": None, "facilities": [],
+    "center": None, "highway": None, "parking": None, "roads": [],
+}
 
-def _regeo_response(address: str) -> str:
-    return json.dumps({"status": "1", "regeocode": {"formatted_address": address}})
+
+def _regeo_response(address: str, roads: list[str] | None = None) -> str:
+    regeocode: dict[str, Any] = {"formatted_address": address}
+    if roads is not None:
+        regeocode["roads"] = [{"name": r} for r in roads]
+    return json.dumps({"status": "1", "regeocode": regeocode})
 
 
 def _around_response(pois: list[dict[str, Any]]) -> str:
@@ -23,8 +33,18 @@ def test_prefill_geo_parses_facts_from_canned_response() -> None:
 
     def transport(url: str) -> tuple[int, str]:
         calls.append(url)
+        dec = urllib.parse.unquote(url)   # keywords 里的中文是百分号编码，解开再判
         if "regeo" in url:
-            return 200, _regeo_response("浙江省杭州市西湖区示范路1号")
+            return 200, _regeo_response("浙江省杭州市西湖区示范路1号", roads=["示范路", "金城路"])
+        if "政府" in dec:
+            return 200, _around_response([{"name": "西湖区政府", "type": "政府机构", "distance": "3500"}])
+        if "高速" in dec:
+            return 200, _around_response([{"name": "留下收费站", "type": "交通设施", "distance": "2100"}])
+        if "停车场" in dec:
+            return 200, _around_response([
+                {"name": "P1停车场", "type": "停车场", "distance": "120"},
+                {"name": "P2停车场", "type": "停车场", "distance": "300"},
+            ])
         return 200, _around_response(
             [
                 {"name": "示范路公交站", "type": "公交车站", "distance": "80"},
@@ -41,7 +61,11 @@ def test_prefill_geo_parses_facts_from_canned_response() -> None:
     assert facts["bus_stops"] == ["示范路公交站"]
     assert facts["nearest_metro"] == {"name": "示范路地铁站", "distance_m": 350.0}
     assert facts["facilities"] == ["示范超市"]
-    assert len(calls) == 2  # 逆地理 + 周边搜索各打一次
+    assert facts["roads"] == ["示范路", "金城路"]
+    assert facts["center"] == {"name": "西湖区政府", "distance_m": 3500.0}
+    assert facts["highway"] == {"name": "留下收费站", "distance_m": 2100.0}
+    assert facts["parking"] == {"count": 2, "nearest_m": 120.0}
+    assert len(calls) == 5  # 逆地理 + 通用周边 + 政府 + 高速 + 停车场
     assert all("key=test-key" in u for u in calls)
 
 
@@ -52,7 +76,7 @@ def test_prefill_geo_returns_empty_facts_on_non_success_status() -> None:
     client = AmapClient("bad-key", transport=transport)
     facts = client.prefill_geo(120.0, 30.0)
 
-    assert facts == {"address": "", "bus_stops": [], "nearest_metro": None, "facilities": []}
+    assert facts == _EMPTY
 
 
 def test_prefill_geo_returns_empty_facts_on_http_error() -> None:
@@ -62,7 +86,7 @@ def test_prefill_geo_returns_empty_facts_on_http_error() -> None:
     client = AmapClient("bad-key", transport=transport)
     facts = client.prefill_geo(120.0, 30.0)
 
-    assert facts == {"address": "", "bus_stops": [], "nearest_metro": None, "facilities": []}
+    assert facts == _EMPTY
 
 
 def test_prefill_geo_returns_empty_facts_on_transport_exception() -> None:
@@ -72,7 +96,7 @@ def test_prefill_geo_returns_empty_facts_on_transport_exception() -> None:
     client = AmapClient("key", transport=transport)
     facts = client.prefill_geo(120.0, 30.0)
 
-    assert facts == {"address": "", "bus_stops": [], "nearest_metro": None, "facilities": []}
+    assert facts == _EMPTY
 
 
 def test_prefill_geo_returns_empty_facts_on_malformed_json() -> None:
@@ -82,7 +106,7 @@ def test_prefill_geo_returns_empty_facts_on_malformed_json() -> None:
     client = AmapClient("key", transport=transport)
     facts = client.prefill_geo(120.0, 30.0)
 
-    assert facts == {"address": "", "bus_stops": [], "nearest_metro": None, "facilities": []}
+    assert facts == _EMPTY
 
 
 def test_metro_with_unparsable_distance_kept_as_facility() -> None:

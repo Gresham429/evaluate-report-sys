@@ -36,8 +36,14 @@ function makeServer() {
       const d = state.drafts[p.survey_id] || {};
       return { category: d.category || '', content: d.content || {}, status: d.status || '', updated_at: d.updated_at || '' };
     }
-    if (a === 'prefillGeo') return { address: '杭州市西湖区某路', bus_stops: ['A站', 'B站'],
-      facilities: ['学校', '医院'], nearest_metro: { name: '龙翔桥', distance_m: 300 } };
+    if (a === 'prefillGeo') return {
+      address: '杭州市西湖区某路', bus_stops: ['A站', 'B站'],
+      facilities: ['学校', '医院'], nearest_metro: { name: '龙翔桥', distance_m: 300 },
+      center: { name: '西湖区政府', distance_m: 3500 },
+      highway: { name: '留下收费站', distance_m: 2100 },
+      parking: { count: 4, nearest_m: 120 },
+      roads: ['文一路', '古墩路'],
+    };
     if (a === 'whoami') return { userid: 'u1', name: '薛焱' };
     return {};
   }
@@ -374,6 +380,9 @@ async function main() {
   eq(facG.data.descs['离地铁距离'], '手填：紧邻2号线', 'G4 已手填的匹配因素不被地图覆盖');
   eq(facG.data.descs['200米内公交线路数'], 'A站、B站', 'G4 空的公交因素被地图填入');
   eq(facG.data.descs['公共服务设施'], '学校、医院', 'G4 空的公共服务设施被地图填入');
+  eq(facG.data.descs['停车便利度'], '周边约4个停车场，最近约120米', 'G4 停车便利度←地图停车场');
+  eq(facG.data.descs['道路通达度'], '临近：文一路、古墩路', 'G4 道路通达度←就近道路');
+  eq(facG.data.descs[f0.name], '距政府约4公里', 'G4 重要场所距离已手填，中心事实不覆盖');
   facG.onDone();
   await tick();
   const gDraft = await store.loadDraftLocal(lidG);

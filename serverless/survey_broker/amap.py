@@ -46,7 +46,13 @@ def _make_urllib_transport(timeout: float) -> AmapTransport:
 
 
 def _empty_facts() -> dict[str, Any]:
-    return {"address": "", "bus_stops": [], "nearest_metro": None, "facilities": []}
+    return {
+        "address": "", "bus_stops": [], "nearest_metro": None, "facilities": [],
+        "center": None,    # 最近政府/行政中心 {name, distance_m}——喂 重要场所/离城中心距离
+        "highway": None,   # 最近高速口/收费站 {name, distance_m}——喂 离高速口距离
+        "parking": None,   # 周边停车场 {count, nearest_m}——喂 附近停车场数量/停车便利度
+        "roads": [],       # 就近道路名——喂 道路通达度/临路状况/临街道路等级
+    }
 
 
 class AmapClient:
@@ -95,15 +101,62 @@ class AmapClient:
         regeo = self._get(_REGEO_URL, {"location": location, "extensions": "all"})
         if regeo is not None:
             # 待真机校准：字段路径按高德逆地理编码文档的常见形状假定——
-            #   regeocode.formatted_address
+            #   regeocode.formatted_address / regeocode.roads[].name
             regeocode = regeo.get("regeocode") or {}
             facts["address"] = str(regeocode.get("formatted_address") or "")
+            facts["roads"] = self._road_names(regeocode)
 
         around = self._get(_AROUND_URL, {"location": location, "radius": "1000"})
         if around is not None:
             facts.update(self._poi_facts(around))
 
+        # 定向找最近：政府/行政中心、高速口、停车场（各一次带 keywords 的周边检索）。
+        facts["center"] = self._nearest(location, "政府", "5000")
+        facts["highway"] = self._nearest(location, "高速", "5000")
+        facts["parking"] = self._parking(location, "2000")
+
         return facts
+
+    def _around_pois(self, location: str, keywords: str, radius: str) -> list[dict[str, Any]]:
+        """按关键字周边检索，按距离排序。任何失败回空列表（不拖垮预填）。
+        # 待真机校准：keywords 检索 + sortrule=distance；pois[].name/.distance 字段路径。"""
+        obj = self._get(
+            _AROUND_URL,
+            {"location": location, "keywords": keywords, "radius": radius, "sortrule": "distance"},
+        )
+        pois = (obj.get("pois") or []) if obj else []
+        return [p for p in pois if isinstance(p, dict) and p.get("name")]
+
+    def _nearest(self, location: str, keywords: str, radius: str) -> dict[str, Any] | None:
+        """最近一条同类 POI → {name, distance_m}；无则 None。"""
+        for poi in self._around_pois(location, keywords, radius):
+            try:
+                return {"name": str(poi.get("name")), "distance_m": float(poi.get("distance") or 0)}
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    def _parking(self, location: str, radius: str) -> dict[str, Any] | None:
+        """周边停车场 → {count, nearest_m}；无则 None。"""
+        pois = self._around_pois(location, "停车场", radius)
+        if not pois:
+            return None
+        try:
+            nearest: float | None = float(pois[0].get("distance") or 0)
+        except (TypeError, ValueError):
+            nearest = None
+        return {"count": len(pois), "nearest_m": nearest}
+
+    @staticmethod
+    def _road_names(regeocode: dict[str, Any]) -> list[str]:
+        """逆地理 regeocode.roads[].name → 就近几条路名（去重、最多 4 条）。"""
+        out: list[str] = []
+        for road in regeocode.get("roads") or []:
+            if isinstance(road, dict) and road.get("name"):
+                name = str(road["name"])
+                if name not in out:
+                    out.append(name)
+        return out[:4]
 
     @staticmethod
     def _poi_facts(around: dict[str, Any]) -> dict[str, Any]:
