@@ -6,6 +6,8 @@
 这一层，方便部署时单独按真机校准（# 待部署校准）。
 """
 
+import base64
+import binascii
 import json
 import logging
 import os
@@ -13,6 +15,7 @@ from typing import Any, Protocol
 
 from serverless.survey_broker.amap import AmapClient
 from serverless.survey_broker.identity import DingtalkIdentity
+from serverless.survey_broker.media import DingtalkMedia
 from serverless.survey_broker.store import SurveyBrokerStore
 from src.dingtalk.notable import NotableClient
 
@@ -51,6 +54,12 @@ class _Identity(Protocol):
     def whoami(self, auth_code: str) -> dict[str, Any]: ...
 
 
+class _Media(Protocol):
+    """`dispatch` 只需要 media 的这一个方法（`DingtalkMedia` 天然满足）。"""
+
+    def upload(self, name: str, data: bytes, mime: str = ...) -> dict[str, str]: ...
+
+
 def _require(payload: dict[str, Any], key: str) -> Any:
     """payload 里必填字段缺失 → ValueError（映射成 400）。
 
@@ -63,9 +72,18 @@ def _require(payload: dict[str, Any], key: str) -> Any:
 
 
 def dispatch(
-    action: str, payload: dict[str, Any], *, store: _Store, amap: _Amap, identity: _Identity
+    action: str,
+    payload: dict[str, Any],
+    *,
+    store: _Store,
+    amap: _Amap,
+    identity: _Identity,
+    media: _Media | None = None,
 ) -> tuple[int, dict[str, Any]]:
-    """路由一个动作到 store/amap/identity。
+    """路由一个动作到 store/amap/identity/media。
+
+    `media` 关键字可选（默认 None）——只有 `uploadPhoto` 用到；不传而调 uploadPhoto
+    回 500，其余 action 一律不受影响（保持既有调用点零改动）。
 
     Returns:
         `(http_status, body)`。成功 200；未知 action 400；请求缺字段/内容坏 400；
@@ -76,6 +94,16 @@ def dispatch(
     try:
         if action == "whoami":
             return 200, identity.whoami(str(_require(payload, "authCode")))
+        if action == "uploadPhoto":
+            if media is None:
+                return 500, {"error": "media 未配置"}
+            name = str(payload.get("name") or "photo.jpg")
+            mime = str(payload.get("mime") or "image/jpeg")
+            try:
+                data = base64.b64decode(str(_require(payload, "dataBase64")), validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise ValueError(f"dataBase64 不是合法 base64：{exc}") from exc
+            return 200, media.upload(name, data, mime)
         if action == "saveDraft":
             content = payload.get("content")
             if not isinstance(content, dict):
@@ -149,8 +177,11 @@ def handler(event: bytes | dict[str, Any], context: Any) -> dict[str, Any]:
     store = SurveyBrokerStore(client, os.environ["NOTABLE_SURVEY_SHEET"])
     amap = AmapClient(os.environ["AMAP_KEY"])
     identity = DingtalkIdentity(client.access_token)
+    media = DingtalkMedia(client.access_token)
 
-    status, result = dispatch(action, payload, store=store, amap=amap, identity=identity)
+    status, result = dispatch(
+        action, payload, store=store, amap=amap, identity=identity, media=media
+    )
     return {
         "statusCode": status,
         "headers": {"Content-Type": "application/json"},

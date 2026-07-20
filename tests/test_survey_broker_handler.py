@@ -58,6 +58,17 @@ class FakeIdentity:
         raise ValueError("bad code")
 
 
+class FakeMedia:
+    """内存假 media：回显收到的字节长度，够 dispatch 用的 upload 一个方法。"""
+
+    def __init__(self) -> None:
+        self.last: bytes | None = None
+
+    def upload(self, name: str, data: bytes, mime: str = "image/jpeg") -> dict[str, str]:
+        self.last = data
+        return {"url": f"https://dl/{name}?len={len(data)}", "name": name}
+
+
 def test_dispatch_save_draft_happy_path() -> None:
     store = FakeStore()
     status, body = dispatch(
@@ -142,6 +153,64 @@ def test_dispatch_whoami_bad_code_400() -> None:
 def test_dispatch_whoami_missing_auth_code_400() -> None:
     status, body = dispatch(
         "whoami", {}, store=FakeStore(), amap=FakeAmap(), identity=FakeIdentity()
+    )
+    assert status == 400
+    assert "error" in body
+
+
+def test_dispatch_upload_photo_happy_path() -> None:
+    import base64
+
+    media = FakeMedia()
+    raw = b"\xff\xd8\xffhello-jpeg"
+    status, body = dispatch(
+        "uploadPhoto",
+        {"name": "a.jpg", "dataBase64": base64.b64encode(raw).decode(), "mime": "image/jpeg"},
+        store=FakeStore(),
+        amap=FakeAmap(),
+        identity=FakeIdentity(),
+        media=media,
+    )
+    assert status == 200
+    assert body["url"].startswith("https://dl/a.jpg")
+    assert media.last == raw  # base64 被正确解码成原字节
+
+
+def test_dispatch_upload_photo_without_media_returns_500() -> None:
+    import base64
+
+    status, body = dispatch(
+        "uploadPhoto",
+        {"name": "a.jpg", "dataBase64": base64.b64encode(b"x").decode()},
+        store=FakeStore(),
+        amap=FakeAmap(),
+        identity=FakeIdentity(),
+    )
+    assert status == 500
+    assert "error" in body
+
+
+def test_dispatch_upload_photo_bad_base64_returns_400() -> None:
+    status, body = dispatch(
+        "uploadPhoto",
+        {"name": "a.jpg", "dataBase64": "!!!not-base64!!!"},
+        store=FakeStore(),
+        amap=FakeAmap(),
+        identity=FakeIdentity(),
+        media=FakeMedia(),
+    )
+    assert status == 400
+    assert "error" in body
+
+
+def test_dispatch_upload_photo_missing_data_returns_400() -> None:
+    status, body = dispatch(
+        "uploadPhoto",
+        {"name": "a.jpg"},
+        store=FakeStore(),
+        amap=FakeAmap(),
+        identity=FakeIdentity(),
+        media=FakeMedia(),
     )
     assert status == 400
     assert "error" in body

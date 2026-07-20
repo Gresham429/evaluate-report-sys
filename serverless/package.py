@@ -21,6 +21,7 @@ FILES = [
     "serverless/survey_broker/store.py",
     "serverless/survey_broker/amap.py",
     "serverless/survey_broker/identity.py",
+    "serverless/survey_broker/media.py",
     "serverless/survey_broker/handler.py",
     "serverless/survey_broker/server.py",
     "src/__init__.py",
