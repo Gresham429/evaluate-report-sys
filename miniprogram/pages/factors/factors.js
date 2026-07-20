@@ -1,13 +1,23 @@
+const broker = require('../../utils/broker');
 const store = require('../../utils/store');
 const FACTORS = require('../../factors');
 
-// 逐因素采集：按类别渲染实勘表左列各因素，每项「描述(自由文字)+档次(下拉，取自基础表)」。
-// 描述→content.asset_conditions[因素名]；档次→content.subject_levels[因素名]（键对齐办公端）。
+// 地图地理事实 → 区位因素描述的关键字映射（只把事实填进对应因素的「描述」，
+// 档次仍由估价师手选下拉，铁律 #7）。
+const GEO_MAP = [
+  { kw: '地铁', pick: (geo) => geo.metroText },
+  { kw: '公交', pick: (geo) => geo.bus_stops },
+  { kw: '公共服务设施', pick: (geo) => geo.facilities },
+];
+
+// 逐因素采集：按类别渲染各因素「描述(自由文字)+档次(下拉，取自基础表)」+ 地图预填。
+// 描述→content.asset_conditions[因素名]；档次→content.subject_levels[因素名]；键对齐办公端。
 Page({
   data: {
     localId: '', category: '',
-    groups: [],          // [{section, items:[{name, levels:[...]}]}]
-    descs: {}, levels: {},   // 因素名 → 描述 / 档次
+    groups: [],               // [{section, items:[{name, levels:[...]}]}]
+    descs: {}, levels: {},    // 因素名 → 描述 / 档次
+    gps: null, geo: {},       // 地图预填（从采集页移来）
   },
 
   onLoad(q) {
@@ -18,7 +28,9 @@ Page({
       this.setData({
         category: cat, groups: FACTORS[cat] || [],
         descs: (d && d.assetConditions) || {}, levels: (d && d.subjectLevels) || {},
+        gps: (d && d.gps) || null, geo: (d && d.geo) || {},
       });
+      if (d && d.geo && d.geo.address) this._prefillFromGeo(d.geo);   // 已有地图事实则补空描述
     });
   },
 
@@ -42,13 +54,51 @@ Page({
     return null;
   },
 
-  // 只写「逐因素页拥有」的字段（描述/档次），不碰表单页基本字段与采集页照片。
+  // 地图预填（移自采集页）：取 GPS → 地理事实 → 展示 + 自动填入对应区位因素的空描述。
+  onGeo() {
+    dd.getLocation({
+      success: (loc) => {
+        this.setData({ gps: { lat: loc.latitude, lng: loc.longitude } });
+        broker.request('prefillGeo', { lng: loc.longitude, lat: loc.latitude }).then((f) => {
+          const metro = f.nearest_metro;
+          const geo = {
+            address: f.address,
+            bus_stops: (f.bus_stops || []).join('、') || '（无）',
+            facilities: (f.facilities || []).slice(0, 6).join('、'),
+            metroText: metro ? (metro.name + ' 约' + metro.distance_m + '米') : '（无）',
+          };
+          this.setData({ geo });
+          this._prefillFromGeo(geo);
+          this._persist();
+        }).catch((e) => { this._persist(); this.setData({ msg: '地图预填失败：' + e.detail }); });
+      },
+      fail: (e) => this.setData({ msg: '取定位失败：' + ((e && e.errorMessage) || '') }),
+    });
+  },
+
+  // 地图事实 → 对应区位因素的描述，只填空、不覆盖估价师已写的；档次不动。
+  _prefillFromGeo(geo) {
+    if (!geo) return;
+    const patch = {};
+    this.data.groups.forEach((g) => g.items.forEach((it) => {
+      if (this.data.descs[it.name]) return;   // 已有描述不覆盖
+      let val = '';
+      for (let i = 0; i < GEO_MAP.length; i++) {
+        if (it.name.indexOf(GEO_MAP[i].kw) >= 0) { val = GEO_MAP[i].pick(geo) || ''; break; }
+      }
+      if (val && val !== '（无）') patch['descs.' + it.name] = val;
+    }));
+    if (Object.keys(patch).length) { this.setData(patch); this._persist(); }
+  },
+
+  // 只写「逐因素页拥有」的字段（描述/档次/地图），不碰表单页基本字段与采集页照片。
   _persist() {
     const id = this.data.localId;
     if (!id) return Promise.resolve();
     return store.loadDraftLocal(id).then((d) => {
       const draft = store.assign(d || { id, dirty: true, status: '草稿' }, {
-        id, assetConditions: this.data.descs, subjectLevels: this.data.levels, dirty: true,
+        id, assetConditions: this.data.descs, subjectLevels: this.data.levels,
+        gps: this.data.gps, geo: this.data.geo, dirty: true,
       });
       return store.saveDraftLocal(draft);
     });

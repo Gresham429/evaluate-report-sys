@@ -2,6 +2,17 @@
   <view class="muted">请先回表单选择类别，再填逐因素。</view>
 </view>
 
+<view class="card" a:if="{{category}}">
+  <button class="btn-primary" onTap="onGeo">地图预填地理事实</button>
+  <view a:if="{{geo.address}}">
+    <view>地址：{{geo.address}}</view>
+    <view class="muted">公交：{{geo.bus_stops}}</view>
+    <view class="muted">最近地铁：{{geo.metroText}}</view>
+    <view class="muted">周边：{{geo.facilities}}</view>
+  </view>
+  <view class="muted">已自动填入对应区位因素的描述（只填空、可改）；档次仍由你判断。</view>
+</view>
+
 <block a:for="{{groups}}" a:for-item="grp" key="{{grp.section}}">
   <view class="card">
     <view class="sec">{{grp.section}}</view>

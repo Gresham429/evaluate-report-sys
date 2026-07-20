@@ -365,6 +365,15 @@ async function main() {
   await tick();
   eq(facG.data.levels[f0.name], f0.levels[0], 'G2 选档次落 levels');
   eq(facG.data.descs[f0.name], '距政府约4公里', 'G2 描述落 descs');
+  // G4 地图预填自动填入对应区位因素描述（只填空、不覆盖已手填）
+  facG.onDesc({ currentTarget: { dataset: { name: '离地铁距离' } }, detail: { value: '手填：紧邻2号线' } });
+  await tick();
+  facG.onGeo();
+  await tick();
+  eq(facG.data.geo.metroText, '龙翔桥 约300米', 'G4 地图取到地铁事实');
+  eq(facG.data.descs['离地铁距离'], '手填：紧邻2号线', 'G4 已手填的匹配因素不被地图覆盖');
+  eq(facG.data.descs['200米内公交线路数'], 'A站、B站', 'G4 空的公交因素被地图填入');
+  eq(facG.data.descs['公共服务设施'], '学校、医院', 'G4 空的公共服务设施被地图填入');
   facG.onDone();
   await tick();
   const gDraft = await store.loadDraftLocal(lidG);
@@ -379,6 +388,7 @@ async function main() {
     .find((x) => x.status === '已提交');
   eq(gSub.content.subject_levels[f0.name], f0.levels[0], 'G3 提交后服务端 subject_levels 含档次');
   eq(gSub.content.asset_conditions[f0.name], '距政府约4公里', 'G3 提交后服务端 asset_conditions 含描述');
+  eq(gSub.content.asset_conditions['公共服务设施'], '学校、医院', 'G3 地图预填的描述随提交进服务端');
 
   // ===== H. 入口页：未提交可删 + 已提交按类别分组不可删 =====
   console.log('H. 删除草稿 + 已提交分类展示');

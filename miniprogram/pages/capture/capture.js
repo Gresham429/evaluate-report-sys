@@ -8,15 +8,14 @@ Page({
     localId: '',
     photos: [],     // 已上传：URL 串（进 content.photos）
     pending: [],     // 待上传：{name, dataBase64, path}（仅本机，联网/回表单时补传）
-    gps: null, geo: {}, msg: '',
+    msg: '',
   },
 
   onLoad(q) {
     const id = (q && q.draftId) || '';
     this.setData({ localId: id });
     if (id) store.loadDraftLocal(id).then((d) => {
-      if (d) this.setData({ photos: d.photos || [], pending: d.pendingPhotos || [],
-        gps: d.gps || null, geo: d.geo || {} });
+      if (d) this.setData({ photos: d.photos || [], pending: d.pendingPhotos || [] });
     });
   },
 
@@ -48,25 +47,6 @@ Page({
     })).catch((e) => this.setData({ msg: '读图失败：' + ((e && e.message) || '') }));
   },
 
-  onGeo() {
-    dd.getLocation({
-      success: (loc) => {
-        this.setData({ gps: { lat: loc.latitude, lng: loc.longitude } });
-        broker.request('prefillGeo', { lng: loc.longitude, lat: loc.latitude }).then((f) => {
-          const metro = f.nearest_metro;
-          this.setData({ geo: {
-            address: f.address,
-            bus_stops: (f.bus_stops || []).join('、') || '（无）',
-            facilities: (f.facilities || []).slice(0, 6).join('、'),
-            metroText: metro ? (metro.name + ' 约' + metro.distance_m + '米') : '（无）',
-          }});
-          this._persist();
-        }).catch((e) => { this._persist(); this.setData({ msg: '地图预填失败：' + e.detail }); });
-      },
-      fail: (e) => this.setData({ msg: '取定位失败：' + ((e && e.errorMessage) || '') }),
-    });
-  },
-
   onDelPhoto(e) {
     const i = e.currentTarget.dataset.i;
     const photos = this.data.photos.slice(); photos.splice(i, 1);
@@ -84,8 +64,7 @@ Page({
     if (!id) return Promise.resolve();
     return store.loadDraftLocal(id).then((d) => {
       const draft = store.assign(d || { id, dirty: true, status: '草稿' }, {
-        id, photos: this.data.photos, pendingPhotos: this.data.pending,
-        gps: this.data.gps, geo: this.data.geo, dirty: true,
+        id, photos: this.data.photos, pendingPhotos: this.data.pending, dirty: true,
       });
       return store.saveDraftLocal(draft);
     });
