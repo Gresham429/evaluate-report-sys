@@ -168,6 +168,16 @@ class NotableClient:
         url = self._records_url(sheet, f"/{urllib.parse.quote(record_id)}")
         return self._authed("GET", url, None)
 
+    def delete_record(self, sheet: str, record_id: str) -> None:
+        """删一行（**只给可变的实勘问卷表用**，删草稿/暂存件；台账/实例/基础表只增不改一律不调）。
+
+        # 待真机校准：钉钉多维表删除记录的方法/端点/body 形状按文档假定，未打真机——
+        #   假定 DELETE `.../records`，body `{"records": [record_id]}`（同 update 的 records 数组风格）。
+        #   若真机报错，看日志改成候选：POST `.../records/delete` 或 recordIds 走 query。
+        """
+        url = self._records_url(sheet)  # DELETE .../records，body {records:[id]}
+        self._authed("DELETE", url, {"records": [record_id]})
+
     # ------------------------------------------------------------ 数据表（建表用）
 
     def _sheets_url(self, suffix: str = "") -> str:

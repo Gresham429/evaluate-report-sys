@@ -26,13 +26,15 @@ __all__ = ["RecordWriter", "SurveyBrokerStore"]
 
 
 class RecordWriter(Protocol):
-    """本 store 只需要「实勘问卷」表的读/插/改三个能力。"""
+    """本 store 需要「实勘问卷」表的读/插/改/删四个能力。"""
 
     def list_records(self, sheet: str) -> list[dict[str, Any]]: ...
 
     def insert_record(self, sheet: str, fields: dict[str, Any]) -> str: ...
 
     def update_record(self, sheet: str, record_id: str, fields: dict[str, Any]) -> None: ...
+
+    def delete_record(self, sheet: str, record_id: str) -> None: ...
 
 
 class SurveyBrokerStore:
@@ -110,3 +112,19 @@ class SurveyBrokerStore:
         if record_id is None:
             raise KeyError(f"未找到问卷：{survey_id}")
         self._client.update_record(self._sheet, record_id, {COL_STATUS: STATUS_SUBMITTED})
+
+    def delete(self, survey_id: str) -> None:
+        """删一份草稿/暂存件。**已提交的拒删**——只增不改的底账语义靠这层守住。
+
+        Raises:
+            KeyError: 没有该 ID 的行（映射 404）。
+            ValueError: 该问卷已提交，不可删除（映射 400）。
+        """
+        for rec in self._client.list_records(self._sheet):
+            fields = rec.get("fields", {})
+            if str(fields.get(COL_ID, "")) == survey_id:
+                if str(fields.get(COL_STATUS, "")) == STATUS_SUBMITTED:
+                    raise ValueError("已提交问卷不可删除")
+                self._client.delete_record(self._sheet, str(rec.get("id")))
+                return
+        raise KeyError(f"未找到问卷：{survey_id}")

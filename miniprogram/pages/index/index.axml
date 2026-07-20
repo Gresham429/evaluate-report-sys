@@ -8,10 +8,24 @@
 </view>
 
 <view class="card" a:if="{{drafts.length > 0}}">
-  <view>本机草稿（可续填）</view>
+  <view>未提交草稿（可续填 / 删除）</view>
   <view class="draft" a:for="{{drafts}}" key="{{item.open_id}}" data-id="{{item.open_id}}" onTap="onResume">
-    <view class="draft-h">{{item.category}} · {{item.status || '草稿'}}</view>
-    <view class="muted">{{item.updated_at}} · {{item.survey_id}}</view>
+    <view class="draft-main">
+      <view class="draft-h">{{item.category}} · {{item.status}}</view>
+      <view class="muted">{{item.updated_at}} · {{item.survey_id}}</view>
+    </view>
+    <view class="del" data-id="{{item.open_id}}" catchTap="onDelete">删除</view>
   </view>
 </view>
-<view class="card muted" a:else>本机还没有草稿。</view>
+
+<view class="card" a:for="{{submittedGroups}}" a:for-item="grp" key="{{grp.category}}">
+  <view>已提交 · {{grp.category}}（{{grp.rows.length}}）</view>
+  <view class="draft" a:for="{{grp.rows}}" a:for-item="item" key="{{item.open_id}}" data-id="{{item.open_id}}" onTap="onResume">
+    <view class="draft-main">
+      <view class="draft-h">已提交</view>
+      <view class="muted">{{item.updated_at}} · {{item.survey_id}}</view>
+    </view>
+  </view>
+</view>
+
+<view class="card muted" a:if="{{drafts.length === 0 && submittedGroups.length === 0}}">本机还没有草稿。</view>

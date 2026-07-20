@@ -41,6 +41,8 @@ class _Store(Protocol):
 
     def submit(self, survey_id: str) -> None: ...
 
+    def delete(self, survey_id: str) -> None: ...
+
 
 class _Amap(Protocol):
     """`dispatch` 只需要 amap 的这一个方法（`AmapClient` 天然满足）。"""
@@ -123,6 +125,10 @@ def dispatch(
             survey_id = str(_require(payload, "survey_id"))
             store.submit(survey_id)
             return 200, {"survey_id": survey_id}
+        if action == "deleteDraft":
+            survey_id = str(_require(payload, "survey_id"))
+            store.delete(survey_id)   # 已提交拒删→ValueError→400；找不到→KeyError→404
+            return 200, {"ok": True}
         if action == "prefillGeo":
             lng = float(_require(payload, "lng"))
             lat = float(_require(payload, "lat"))

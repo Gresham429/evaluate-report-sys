@@ -161,6 +161,34 @@ function reconcileFromServer(rows) {
   });
 }
 
+/** 删一份草稿：删本地内容 + 索引条 + legacy myDrafts。回该条 serverId（供调用侧best-effort删服务端）。 */
+function deleteDraft(id) {
+  return Promise.all([loadDraftLocal(id), readIndex()]).then(function (arr) {
+    var d = arr[0], list = arr[1];
+    var serverId = (d && d.serverId) || '';
+    if (!serverId) {   // 内容已清时从索引兜底取 serverId
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].id === id) { serverId = list[i].serverId || ''; break; }
+      }
+    }
+    var out = list.filter(function (e) {
+      if (e.id === id) return false;
+      if (serverId && e.serverId === serverId) return false;
+      return true;
+    });
+    return removeStorage(_draftKey(id))
+      .then(function () { return writeIndex(out); })
+      .then(function () {
+        if (!serverId) return null;
+        return getStorage(LEGACY_KEY).then(function (ids) {
+          if (!Array.isArray(ids)) return null;
+          return setStorage(LEGACY_KEY, ids.filter(function (x) { return x !== serverId; }));
+        });
+      })
+      .then(function () { return serverId; });
+  });
+}
+
 /** 待自动补传的草稿索引条：用户点过暂存/提交但没成功（needsSync）、且未提交完成。
  *  只认 needsSync——填了一半没点保存的草稿（dirty 但 needsSync 假）不会被自动推上服务端。 */
 function listPending() {
@@ -195,5 +223,5 @@ module.exports = {
   saveDraftLocal: saveDraftLocal, loadDraftLocal: loadDraftLocal,
   attachServerId: attachServerId, clearDraftContent: clearDraftContent,
   reconcileFromServer: reconcileFromServer, migrateLegacy: migrateLegacy,
-  listPending: listPending,
+  listPending: listPending, deleteDraft: deleteDraft,
 };

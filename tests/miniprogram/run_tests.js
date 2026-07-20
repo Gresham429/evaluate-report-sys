@@ -31,6 +31,7 @@ function makeServer() {
       return { survey_id: sid };
     }
     if (a === 'submit') { if (state.drafts[p.survey_id]) state.drafts[p.survey_id].status = '已提交'; return { ok: true }; }
+    if (a === 'deleteDraft') { delete state.drafts[p.survey_id]; return { ok: true }; }
     if (a === 'loadDraft') {
       const d = state.drafts[p.survey_id] || {};
       return { category: d.category || '', content: d.content || {}, status: d.status || '', updated_at: d.updated_at || '' };
@@ -62,6 +63,7 @@ function installEnv(server) {
       readFile: ({ filePath, success }) => success({ data: 'B64(' + filePath + ')' }),
     }),
     onNetworkStatusChange: () => {},
+    confirm: ({ success }) => success({ confirm: true }),   // 删除确认框：默认点「删除」
     showToast: (o) => env.spies.toast.push(o),
     navigateBack: () => { env.spies.navBack++; },
     reLaunch: (o) => env.spies.reLaunch.push(o),
@@ -229,8 +231,9 @@ async function main() {
   const ix = makePage(indexCfg);
   ix.onShow();
   await tick();
-  eq(ix.data.drafts.length, 1, 'C1 入口列出一条');
-  eq(ix.data.drafts[0].status, '已提交', 'C1 联网对账把状态刷成已提交');
+  eq(ix.data.drafts.length, 0, 'C1 对账后该条转已提交、离开未提交区');
+  eq(ix.data.submittedGroups.length, 1, 'C1 已提交分组 1 组');
+  eq(ix.data.submittedGroups[0].category, '农用', 'C1 分组类别=农用（联网对账刷成已提交）');
 
   // 离线：仍显示本地
   resetEnv();
@@ -376,6 +379,37 @@ async function main() {
     .find((x) => x.status === '已提交');
   eq(gSub.content.subject_levels[f0.name], f0.levels[0], 'G3 提交后服务端 subject_levels 含档次');
   eq(gSub.content.asset_conditions[f0.name], '距政府约4公里', 'G3 提交后服务端 asset_conditions 含描述');
+
+  // ===== H. 入口页：未提交可删 + 已提交按类别分组不可删 =====
+  console.log('H. 删除草稿 + 已提交分类展示');
+  resetEnv();
+  await store.saveDraftLocal({ id: 'ld1', serverId: 'srv-d1', category: '商业', basic: {},
+    updatedAt: '2026-07-20T03:00:00Z', status: '草稿', dirty: false, needsSync: false });
+  await store.upsertIndexEntry({ id: 'srv-s1', serverId: 'srv-s1', category: '农用',
+    status: '已提交', submitted: true, updatedAt: '2026-07-20T02:00:00Z', dirty: false });
+  await store.upsertIndexEntry({ id: 'srv-s2', serverId: 'srv-s2', category: '办公',
+    status: '已提交', submitted: true, updatedAt: '2026-07-20T01:00:00Z', dirty: false });
+  server.state.drafts['srv-d1'] = { category: '商业', status: '草稿', content: {} };
+  const ixH = makePage(indexCfg);
+  env.offline = true;                 // 跳过服务端对账，纯本地渲染
+  ixH.loadMyDrafts();
+  await tick();
+  eq(ixH.data.drafts.length, 1, 'H1 未提交草稿 1 条（可删区）');
+  eq(ixH.data.drafts[0].submitted, false, 'H1 草稿行 submitted=false');
+  eq(ixH.data.submittedGroups.length, 2, 'H1 已提交按类别分 2 组');
+  const cats = ixH.data.submittedGroups.map((g) => g.category);
+  ok(cats.length === 2 && cats.indexOf('农用') >= 0 && cats.indexOf('办公') >= 0,
+    'H1 分组类别含农用+办公');
+  ok(ixH.data.submittedGroups.every((g) => g.rows.length === 1), 'H1 每组 1 份');
+  // 删未提交草稿
+  env.offline = false;
+  ixH.onDelete({ currentTarget: { dataset: { id: 'ld1' } } });   // confirm 默认点删除
+  await tick();
+  eq(ixH.data.drafts.length, 0, 'H2 删除后未提交区清空');
+  ok(!server.state.drafts['srv-d1'], 'H2 服务端草稿行也被删（best-effort）');
+  const hLocal = await store.loadDraftLocal('ld1');
+  ok(hLocal === null, 'H2 本地内容已删');
+  eq(ixH.data.submittedGroups.length, 2, 'H2 已提交不受影响（仍 2 组、不可删）');
 
   console.log(`\n结果：${PASS} 通过，${FAIL} 失败`);
   process.exit(FAIL ? 1 : 0);

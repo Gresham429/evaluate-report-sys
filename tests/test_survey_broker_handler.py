@@ -41,6 +41,13 @@ class FakeStore:
             raise KeyError(f"未找到问卷：{survey_id}")
         self.rows[survey_id]["status"] = "已提交"
 
+    def delete(self, survey_id: str) -> None:
+        if survey_id not in self.rows:
+            raise KeyError(f"未找到问卷：{survey_id}")
+        if self.rows[survey_id].get("status") == "已提交":
+            raise ValueError("已提交问卷不可删除")
+        del self.rows[survey_id]
+
 
 class FakeAmap:
     """内存假 amap：够 dispatch 用的 prefill_geo 一个方法。"""
@@ -213,6 +220,37 @@ def test_dispatch_upload_photo_missing_data_returns_400() -> None:
         media=FakeMedia(),
     )
     assert status == 400
+    assert "error" in body
+
+
+def test_dispatch_delete_draft_happy_path() -> None:
+    store = FakeStore()
+    store.rows["q1"] = {"survey_id": "q1", "status": "草稿"}
+    status, body = dispatch(
+        "deleteDraft", {"survey_id": "q1"}, store=store, amap=FakeAmap(), identity=FakeIdentity()
+    )
+    assert status == 200
+    assert body == {"ok": True}
+    assert "q1" not in store.rows
+
+
+def test_dispatch_delete_submitted_returns_400() -> None:
+    store = FakeStore()
+    store.rows["q1"] = {"survey_id": "q1", "status": "已提交"}
+    status, body = dispatch(
+        "deleteDraft", {"survey_id": "q1"}, store=store, amap=FakeAmap(), identity=FakeIdentity()
+    )
+    assert status == 400
+    assert "error" in body
+    assert "q1" in store.rows   # 拒删后还在
+
+
+def test_dispatch_delete_missing_returns_404() -> None:
+    status, body = dispatch(
+        "deleteDraft", {"survey_id": "ghost"},
+        store=FakeStore(), amap=FakeAmap(), identity=FakeIdentity(),
+    )
+    assert status == 404
     assert "error" in body
 
 

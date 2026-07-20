@@ -1,2 +1,4 @@
-.draft { padding: 16rpx 0; border-bottom: 1rpx solid #eee; }
+.draft { display: flex; align-items: center; padding: 16rpx 0; border-bottom: 1rpx solid #eee; }
+.draft-main { flex: 1; }
 .draft-h { margin-bottom: 4rpx; }
+.del { color: #d4351c; font-size: 26rpx; padding: 8rpx 16rpx; border: 1rpx solid #f0c0bb; border-radius: 8rpx; }

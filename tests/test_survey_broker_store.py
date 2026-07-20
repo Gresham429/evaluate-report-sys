@@ -29,6 +29,9 @@ class FakeClient:
     def update_record(self, sheet: str, record_id: str, fields: dict[str, Any]) -> None:
         self._rows[record_id].update(fields)
 
+    def delete_record(self, sheet: str, record_id: str) -> None:
+        self._rows.pop(record_id, None)
+
 
 def _content() -> dict[str, Any]:
     return {
@@ -122,3 +125,33 @@ def test_submit_unknown_raises_key_error() -> None:
     store = SurveyBrokerStore(FakeClient(), _SHEET)
     with pytest.raises(KeyError):
         store.submit("no-such-id")
+
+
+def test_delete_draft_removes_row() -> None:
+    store = SurveyBrokerStore(FakeClient(), _SHEET)
+    sid = store.save_draft(
+        survey_id=None, filler="张三", category="住宅",
+        updated_at="t", content=_content(),
+    )
+    store.delete(sid)
+    with pytest.raises(KeyError):
+        store.load(sid)
+
+
+def test_delete_submitted_refused() -> None:
+    store = SurveyBrokerStore(FakeClient(), _SHEET)
+    sid = store.save_draft(
+        survey_id=None, filler="张三", category="住宅",
+        updated_at="t", content=_content(),
+    )
+    store.submit(sid)
+    with pytest.raises(ValueError, match="已提交"):
+        store.delete(sid)
+    # 拒删后行还在
+    assert store.load(sid)["status"] == STATUS_SUBMITTED
+
+
+def test_delete_missing_raises_keyerror() -> None:
+    store = SurveyBrokerStore(FakeClient(), _SHEET)
+    with pytest.raises(KeyError):
+        store.delete("ghost")

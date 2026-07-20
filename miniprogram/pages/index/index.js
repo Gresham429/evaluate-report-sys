@@ -10,7 +10,8 @@ function fmtTime(s) {
 }
 
 Page({
-  data: { filler: '', fillerName: '', authError: '', drafts: [] },
+  // drafts=未提交（可删）；submittedGroups=已提交按类别分组（不可删）
+  data: { filler: '', fillerName: '', authError: '', drafts: [], submittedGroups: [] },
 
   onLoad() { this.auth(); },
   onShow() { sync.flush(broker, store); this.loadMyDrafts(); },
@@ -33,7 +34,7 @@ Page({
   // 本地索引秒出 → 联网对账刷新（离线则止于本地）
   loadMyDrafts() {
     store.migrateLegacy().then((list) => {
-      this.setData({ drafts: this._toRows(list) });
+      this._render(list);
       const withServer = list.filter((e) => e.serverId && !e.submitted);
       if (!withServer.length) return;
       Promise.all(withServer.map((e) =>
@@ -44,10 +45,22 @@ Page({
       )).then((rows) => {
         const ok = rows.filter(Boolean);
         if (!ok.length) return;   // 全失败＝离线，保留本地渲染
-        store.reconcileFromServer(ok).then((merged) =>
-          this.setData({ drafts: this._toRows(merged) }));
+        store.reconcileFromServer(ok).then((merged) => this._render(merged));
       });
     });
+  },
+
+  _render(list) {
+    const rows = this._toRows(list);
+    const drafts = rows.filter((r) => !r.submitted);
+    const submitted = rows.filter((r) => r.submitted);
+    const map = {}, order = [];
+    submitted.forEach((r) => {
+      if (!map[r.category]) { map[r.category] = []; order.push(r.category); }
+      map[r.category].push(r);
+    });
+    const submittedGroups = order.map((c) => ({ category: c, rows: map[c] }));
+    this.setData({ drafts, submittedGroups });
   },
 
   // 索引 → 列表行：按 updatedAt 倒序；状态本地优先（未同步/已提交）。
@@ -59,10 +72,29 @@ Page({
         survey_id: e.serverId || e.id,
         category: e.category || '（未选类别）',
         status: e.submitted ? '已提交' : (e.dirty ? '未同步' : (e.status || '草稿')),
+        submitted: !!e.submitted,
         updated_at: fmtTime(e.updatedAt),
       }));
   },
 
   onNew() { dd.navigateTo({ url: '/pages/form/form' }); },
   onResume(e) { dd.navigateTo({ url: '/pages/form/form?draftId=' + e.currentTarget.dataset.id }); },
+
+  // 删未提交草稿：确认 → 删本地 → 在线则best-effort删服务端草稿行 → 刷新
+  onDelete(e) {
+    const id = e.currentTarget.dataset.id;
+    dd.confirm({
+      title: '删除草稿',
+      content: '删除这份未提交的草稿？不可恢复。',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      success: (r) => { if (r.confirm) this._doDelete(id); },
+    });
+  },
+  _doDelete(id) {
+    store.deleteDraft(id).then((serverId) => {
+      if (serverId) broker.request('deleteDraft', { survey_id: serverId }).catch(() => {});
+      this.loadMyDrafts();
+    });
+  },
 });
