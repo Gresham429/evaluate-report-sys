@@ -10,6 +10,7 @@
     <view class="muted">最近地铁：{{geo.metroText}}</view>
     <view class="muted" a:if="{{geo.centerText}}">行政中心：{{geo.centerText}}</view>
     <view class="muted" a:if="{{geo.highwayText}}">最近高速口：{{geo.highwayText}}</view>
+    <view class="muted" a:if="{{geo.waterText}}">最近水源：{{geo.waterText}}</view>
     <view class="muted" a:if="{{geo.parkingText}}">停车场：{{geo.parkingText}}</view>
     <view class="muted" a:if="{{geo.roadsText}}">{{geo.roadsText}}</view>
     <view class="muted">周边：{{geo.facilities}}</view>

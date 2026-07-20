@@ -11,6 +11,7 @@ const GEO_MAP = [
   { kw: '高速', pick: (geo) => geo.highwayText },
   { kw: '城中心', pick: (geo) => geo.centerText },
   { kw: '重要场所', pick: (geo) => geo.centerText },
+  { kw: '水源', pick: (geo) => geo.waterText },
   { kw: '停车', pick: (geo) => geo.parkingText },
   { kw: '道路', pick: (geo) => geo.roadsText },
   { kw: '临路', pick: (geo) => geo.roadsText },
@@ -32,6 +33,7 @@ function _geoTexts(f) {
     metroText: metro ? (metro.name + ' ' + _dist(metro.distance_m)) : '（无）',
     highwayText: hw ? (hw.name + ' ' + _dist(hw.distance_m)) : '',
     centerText: ctr ? (ctr.name + ' ' + _dist(ctr.distance_m)) : '',
+    waterText: f.water ? (f.water.name + ' ' + _dist(f.water.distance_m)) : '',
     parkingText: pk ? ('周边约' + pk.count + '个停车场'
       + (pk.nearest_m ? ('，最近' + _dist(pk.nearest_m)) : '')) : '',
     roadsText: (f.roads && f.roads.length) ? ('临近：' + f.roads.join('、')) : '',

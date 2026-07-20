@@ -42,6 +42,7 @@ function makeServer() {
       center: { name: '西湖区政府', distance_m: 3500 },
       highway: { name: '留下收费站', distance_m: 2100 },
       parking: { count: 4, nearest_m: 120 },
+      water: { name: '西溪湿地', distance_m: 800 },
       roads: ['文一路', '古墩路'],
     };
     if (a === 'whoami') return { userid: 'u1', name: '薛焱' };
@@ -429,6 +430,22 @@ async function main() {
   const hLocal = await store.loadDraftLocal('ld1');
   ok(hLocal === null, 'H2 本地内容已删');
   eq(ixH.data.submittedGroups.length, 2, 'H2 已提交不受影响（仍 2 组、不可删）');
+
+  // ===== G5. 农用类别：离城中心/离高速口/离水源地距离 全被 GPS 填入（对应真机截图那类）=====
+  console.log('G5. 农用区位 GPS 预填');
+  resetEnv();
+  await store.saveDraftLocal({ id: 'lag', category: '农用', filler: 'u1', basic: {},
+    updatedAt: 't', status: '草稿', dirty: true, needsSync: false });
+  const facAg = makePage(factorsCfg);
+  facAg.onLoad({ draftId: 'lag' });
+  await tick();
+  eq(facAg.data.category, '农用', 'G5 农用类别载入');
+  facAg.onGeo();
+  await tick();
+  eq(facAg.data.descs['离城中心距离'], '西湖区政府 约3.5公里', 'G5 离城中心距离←中心事实');
+  eq(facAg.data.descs['离高速口距离'], '留下收费站 约2.1公里', 'G5 离高速口距离←高速事实');
+  eq(facAg.data.descs['离水源地距离'], '西溪湿地 约800米', 'G5 离水源地距离←水源事实');
+  eq(facAg.data.descs['货车停车便利度'], '周边约4个停车场，最近约120米', 'G5 货车停车便利度←停车场');
 
   console.log(`\n结果：${PASS} 通过，${FAIL} 失败`);
   process.exit(FAIL ? 1 : 0);

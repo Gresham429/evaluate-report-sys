@@ -51,6 +51,7 @@ def _empty_facts() -> dict[str, Any]:
         "center": None,    # 最近政府/行政中心 {name, distance_m}——喂 重要场所/离城中心距离
         "highway": None,   # 最近高速口/收费站 {name, distance_m}——喂 离高速口距离
         "parking": None,   # 周边停车场 {count, nearest_m}——喂 附近停车场数量/停车便利度
+        "water": None,     # 最近水库/河流/湖泊 {name, distance_m}——喂 离水源地距离（农用）
         "roads": [],       # 就近道路名——喂 道路通达度/临路状况/临街道路等级
     }
 
@@ -110,10 +111,11 @@ class AmapClient:
         if around is not None:
             facts.update(self._poi_facts(around))
 
-        # 定向找最近：政府/行政中心、高速口、停车场（各一次带 keywords 的周边检索）。
+        # 定向找最近：政府/行政中心、高速口、停车场、水源（各一次带 keywords 的周边检索）。
         facts["center"] = self._nearest(location, "政府", "5000")
         facts["highway"] = self._nearest(location, "高速", "5000")
         facts["parking"] = self._parking(location, "2000")
+        facts["water"] = self._nearest(location, "水库|河流|湖泊", "5000")
 
         return facts
 

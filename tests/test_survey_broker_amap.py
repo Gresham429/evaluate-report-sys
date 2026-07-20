@@ -13,7 +13,7 @@ from serverless.survey_broker.amap import AmapClient
 # prefill_geo 失败/空时的规范返回形状（与 amap._empty_facts 对齐）
 _EMPTY = {
     "address": "", "bus_stops": [], "nearest_metro": None, "facilities": [],
-    "center": None, "highway": None, "parking": None, "roads": [],
+    "center": None, "highway": None, "parking": None, "water": None, "roads": [],
 }
 
 
@@ -45,6 +45,8 @@ def test_prefill_geo_parses_facts_from_canned_response() -> None:
                 {"name": "P1停车场", "type": "停车场", "distance": "120"},
                 {"name": "P2停车场", "type": "停车场", "distance": "300"},
             ])
+        if "水库" in dec:
+            return 200, _around_response([{"name": "西溪湿地", "type": "风景名胜", "distance": "800"}])
         return 200, _around_response(
             [
                 {"name": "示范路公交站", "type": "公交车站", "distance": "80"},
@@ -65,7 +67,8 @@ def test_prefill_geo_parses_facts_from_canned_response() -> None:
     assert facts["center"] == {"name": "西湖区政府", "distance_m": 3500.0}
     assert facts["highway"] == {"name": "留下收费站", "distance_m": 2100.0}
     assert facts["parking"] == {"count": 2, "nearest_m": 120.0}
-    assert len(calls) == 5  # 逆地理 + 通用周边 + 政府 + 高速 + 停车场
+    assert facts["water"] == {"name": "西溪湿地", "distance_m": 800.0}
+    assert len(calls) == 6  # 逆地理 + 通用周边 + 政府 + 高速 + 停车场 + 水源
     assert all("key=test-key" in u for u in calls)
 
 
