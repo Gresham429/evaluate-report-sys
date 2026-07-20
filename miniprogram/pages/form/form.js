@@ -2,18 +2,29 @@ const broker = require('../../utils/broker');
 const store = require('../../utils/store');
 const app = getApp();
 
+// 标签与实勘表 xlsx 左列逐字一致（tools/gen_survey_factors 同源实测）。
 const FIELDS = [
   { key: 'project_name', label: '项目名称' }, { key: 'client', label: '委托人' },
-  { key: 'client_address', label: '委托人地址' }, { key: 'legal_rep', label: '法定代表人' },
-  { key: 'purpose', label: '估价目的' }, { key: 'survey_date', label: '实地查勘日期' },
-  { key: 'value_date', label: '价值时点' }, { key: 'materials', label: '提供资料' },
-  { key: 'certificate_status', label: '权属证书情况' }, { key: 'owner', label: '权利人' },
-  { key: 'address', label: '坐落' }, { key: 'usage', label: '设定出租用途' },
-  { key: 'scale', label: '规模' }, { key: 'scope', label: '估价范围' },
-  { key: 'current_status', label: '利用现状' }, { key: 'surveyor', label: '查勘人' },
-  { key: 'report_no', label: '报告编号(可空)' }, { key: 'issue_date', label: '报告出具日期' },
+  { key: 'client_address', label: '住址' }, { key: 'legal_rep', label: '法定代表人或负责人' },
+  { key: 'purpose', label: '估价目的' }, { key: 'survey_date', label: '实地勘查日期' },
+  { key: 'value_date', label: '价值时点' }, { key: 'materials', label: '委托人提供的材料' },
+  { key: 'certificate_status', label: '是否取得产权证书' }, { key: 'owner', label: '权利人' },
+  { key: 'address', label: '地址' }, { key: 'usage', label: '设定出租用途' },
+  { key: 'scale', label: '估价对象规模' }, { key: 'scope', label: '估价范围' },
+  { key: 'current_status', label: '现使用状况' }, { key: 'surveyor', label: '现场查勘记录人员' },
+  { key: 'report_no', label: '评估报告编号' }, { key: 'issue_date', label: '估价报告出具日期' },
   { key: 'work_period', label: '估价作业期' },
 ];
+// 逐类别标签微差：实测「办公/商业」的规模列不带「估价对象」前缀。
+// （工业/建设用地 xlsx 的 F3/F4 标签互换是已知 Excel 笔误，代码按单元格位置取值，
+//  故 issue_date/work_period 统一用规范标签，不照抄那处笔误。）
+const LABEL_OVERRIDES = { scale: { 办公: '规模', 商业: '规模' } };
+function fieldsFor(category) {
+  return FIELDS.map((f) => {
+    const ov = LABEL_OVERRIDES[f.key];
+    return ov && ov[category] ? { key: f.key, label: ov[category] } : f;
+  });
+}
 const CATEGORIES = ['农用', '办公', '商业', '住宅', '工业', '停车场用地', '建设用地'];
 
 Page({
@@ -42,6 +53,7 @@ Page({
           form: { category: d.category || '', basic: d.basic || {} },
           gps: d.gps || null, geo: d.geo || {},
           catIndex: Math.max(0, CATEGORIES.indexOf(d.category)),
+          fields: fieldsFor(d.category || ''),
           serverStatus: d.status || '', dirty: !!d.dirty,
         });
       } else {
@@ -68,6 +80,7 @@ Page({
       this.setData({
         survey_id: sid, form: { category: draft.category, basic: draft.basic },
         gps: draft.gps, catIndex: Math.max(0, CATEGORIES.indexOf(draft.category)),
+        fields: fieldsFor(draft.category || ''),
         serverStatus: draft.status, dirty: false, offline: false,
       });
     }).catch(() => this.setData({ offline: true }));
@@ -91,7 +104,7 @@ Page({
 
   onCategory(e) {
     const cat = CATEGORIES[e.detail.value];
-    this.setData({ catIndex: e.detail.value, 'form.category': cat });
+    this.setData({ catIndex: e.detail.value, 'form.category': cat, fields: fieldsFor(cat) });
     this._autosave();
   },
   onField(e) {
