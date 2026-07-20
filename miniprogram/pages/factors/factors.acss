@@ -1,0 +1,5 @@
+.sec { font-weight: 600; color: #1677ff; padding: 4rpx 0 12rpx; }
+.fac { padding: 12rpx 0; border-top: 1rpx solid #f0f0f0; }
+.name { display: block; color: #333; margin-bottom: 8rpx; }
+.pick { border: 1rpx solid #ddd; border-radius: 6rpx; padding: 10rpx; color: #333; margin-bottom: 8rpx; }
+.inp { border: 1rpx solid #ddd; border-radius: 6rpx; padding: 10rpx; width: 100%; box-sizing: border-box; }

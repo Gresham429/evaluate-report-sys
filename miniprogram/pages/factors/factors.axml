@@ -1,0 +1,20 @@
+<view class="card" a:if="{{!category}}">
+  <view class="muted">请先回表单选择类别，再填逐因素。</view>
+</view>
+
+<block a:for="{{groups}}" a:for-item="grp" key="{{grp.section}}">
+  <view class="card">
+    <view class="sec">{{grp.section}}</view>
+    <view class="fac" a:for="{{grp.items}}" a:for-item="item" key="{{item.name}}">
+      <text class="name">{{item.name}}</text>
+      <picker range="{{item.levels}}" data-name="{{item.name}}" onChange="onLevel">
+        <view class="pick">{{levels[item.name] || '选档次'}}</view>
+      </picker>
+      <input class="inp" value="{{descs[item.name]}}" data-name="{{item.name}}" onInput="onDesc" placeholder="现场描述" />
+    </view>
+  </view>
+</block>
+
+<view class="card" a:if="{{category}}">
+  <button class="btn-primary" onTap="onDone">完成，返回表单</button>
+</view>

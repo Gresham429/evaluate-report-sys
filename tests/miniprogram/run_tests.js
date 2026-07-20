@@ -113,6 +113,9 @@ require(path.join(__dirname, '../../miniprogram/pages/index/index.js'));
 const indexCfg = lastCfg;
 require(path.join(__dirname, '../../miniprogram/pages/capture/capture.js'));
 const captureCfg = lastCfg;
+require(path.join(__dirname, '../../miniprogram/pages/factors/factors.js'));
+const factorsCfg = lastCfg;
+const FACTORS = require(path.join(__dirname, '../../miniprogram/factors.js'));
 
 function resetEnv() { env = installEnv(server); server.state.seq = 0; server.state.drafts = {}; }
 
@@ -329,6 +332,50 @@ async function main() {
   eq((draftF.pendingPhotos || []).length, 0, 'F2 pendingPhotos 已空');
   await sync.flush(broker, store);   // lf 已 needsSync=false → listPending 不含它
   eq(server.state.uploads - u2, 0, 'F2 重跑不重传照片');
+
+  // ===== G. 逐因素采集（描述 + 档次下拉）落 content.asset_conditions/subject_levels =====
+  console.log('G. 逐因素采集');
+  // G0 数据源自检：每类每因素都有档次选项
+  let anyEmpty = false;
+  Object.keys(FACTORS).forEach((cat) => (FACTORS[cat] || []).forEach((g) =>
+    g.items.forEach((it) => { if (!it.levels || !it.levels.length) anyEmpty = true; })));
+  ok(!anyEmpty, 'G0 factors.js 每因素都有档次选项');
+  ok((FACTORS['办公'] || []).length === 3, 'G0 办公 3 组（区位/实物/权益）');
+
+  resetEnv();
+  const fpG = makePage(formCfg);
+  fpG.onLoad({});
+  const lidG = fpG.data.localId;
+  fpG.onCategory({ detail: { value: 1 } });   // 办公
+  await tick();
+  fpG.onFactors();
+  await tick();
+  ok(env.spies.navTo.length >= 1, 'G1 表单跳逐因素页');
+  const facG = makePage(factorsCfg);
+  facG.onLoad({ draftId: lidG });
+  await tick();
+  eq(facG.data.category, '办公', 'G1 逐因素页读到类别');
+  eq(facG.data.groups.length, 3, 'G1 渲染 3 组');
+  const f0 = facG.data.groups[0].items[0];   // 区位·重要场所距离
+  facG.onLevel({ currentTarget: { dataset: { name: f0.name } }, detail: { value: 0 } });
+  facG.onDesc({ currentTarget: { dataset: { name: f0.name } }, detail: { value: '距政府约4公里' } });
+  await tick();
+  eq(facG.data.levels[f0.name], f0.levels[0], 'G2 选档次落 levels');
+  eq(facG.data.descs[f0.name], '距政府约4公里', 'G2 描述落 descs');
+  facG.onDone();
+  await tick();
+  const gDraft = await store.loadDraftLocal(lidG);
+  eq(gDraft.subjectLevels[f0.name], f0.levels[0], 'G2 档次持久到草稿缓存');
+  // 回表单 → 提交 → 服务端 content 含逐因素
+  fpG.onShow();
+  await tick();
+  eq(fpG.data.subjectLevels[f0.name], f0.levels[0], 'G3 表单 onShow 拉到档次');
+  fpG.onSubmit();
+  await tick();
+  const gSub = Object.keys(server.state.drafts).map((k) => server.state.drafts[k])
+    .find((x) => x.status === '已提交');
+  eq(gSub.content.subject_levels[f0.name], f0.levels[0], 'G3 提交后服务端 subject_levels 含档次');
+  eq(gSub.content.asset_conditions[f0.name], '距政府约4公里', 'G3 提交后服务端 asset_conditions 含描述');
 
   console.log(`\n结果：${PASS} 通过，${FAIL} 失败`);
   process.exit(FAIL ? 1 : 0);

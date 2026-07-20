@@ -1,5 +1,5 @@
 {
-  "pages": ["pages/index/index", "pages/form/form", "pages/capture/capture"],
+  "pages": ["pages/index/index", "pages/form/form", "pages/capture/capture", "pages/factors/factors"],
   "window": {
     "defaultTitle": "实勘问卷",
     "titleBarColor": "#1677ff",

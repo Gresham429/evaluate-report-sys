@@ -33,7 +33,8 @@ Page({
     fields: FIELDS, categories: CATEGORIES, catIndex: 0,
     form: { category: '', basic: {} },
     localId: '', survey_id: '', gps: null, geo: {},
-    photos: [], pendingPhotos: [],   // 采集页拥有；表单只随草稿带上传/持久
+    photos: [], pendingPhotos: [],       // 采集页拥有；表单只随草稿带上传/持久
+    subjectLevels: {}, assetConditions: {},  // 逐因素页拥有：档次 / 描述
     msg: '',
     serverStatus: '',       // 载入/存过后的服务端状态：草稿 / 已提交
     dirty: false,           // 本地有改动、尚未成功同步（驱动「未同步」徽标）
@@ -52,7 +53,8 @@ Page({
     const id = this.data.localId;
     if (id) store.loadDraftLocal(id).then((d) => {
       if (d) this.setData({ photos: d.photos || [], pendingPhotos: d.pendingPhotos || [],
-        gps: d.gps || null, geo: d.geo || {} });
+        gps: d.gps || null, geo: d.geo || {},
+        subjectLevels: d.subjectLevels || {}, assetConditions: d.assetConditions || {} });
     });
     sync.flush(broker, store);
   },
@@ -68,6 +70,7 @@ Page({
           form: { category: d.category || '', basic: d.basic || {} },
           gps: d.gps || null, geo: d.geo || {},
           photos: d.photos || [], pendingPhotos: d.pendingPhotos || [],
+          subjectLevels: d.subjectLevels || {}, assetConditions: d.assetConditions || {},
           catIndex: Math.max(0, CATEGORIES.indexOf(d.category)),
           fields: fieldsFor(d.category || ''),
           serverStatus: d.status || '', dirty: !!d.dirty,
@@ -92,12 +95,14 @@ Page({
         category: d.category || '', basic: c.basic || {}, gps: c.gps || null,
         geo: this.data.geo || {}, photos: c.photos || [],
         pendingPhotos: this.data.pendingPhotos || [],
+        subjectLevels: c.subject_levels || {}, assetConditions: c.asset_conditions || {},
         updatedAt: d.updated_at || '', status: d.status || '', dirty: false,
       };
       store.saveDraftLocal(draft);
       this.setData({
         survey_id: sid, form: { category: draft.category, basic: draft.basic },
         gps: draft.gps, photos: draft.photos,
+        subjectLevels: draft.subjectLevels, assetConditions: draft.assetConditions,
         catIndex: Math.max(0, CATEGORIES.indexOf(draft.category)),
         fields: fieldsFor(draft.category || ''),
         serverStatus: draft.status, dirty: false, offline: false,
@@ -112,6 +117,7 @@ Page({
       category: this.data.form.category, basic: this.data.form.basic,
       gps: this.data.gps, geo: this.data.geo,
       photos: this.data.photos || [], pendingPhotos: this.data.pendingPhotos || [],
+      subjectLevels: this.data.subjectLevels || {}, assetConditions: this.data.assetConditions || {},
       updatedAt: new Date().toISOString(),
       status: this.data.serverStatus || '草稿',
       dirty: true, needsSync: this.data.needsSync, pendingSubmit: this.data.pendingSubmit,
@@ -142,10 +148,21 @@ Page({
     dd.navigateTo({ url: '/pages/capture/capture?draftId=' + id });
   },
 
+  // 进逐因素页（按类别填描述+档次）；须先选类别。
+  onFactors() {
+    if (!this.data.form.category) { this.setData({ msg: '请先选类别再填逐因素' }); return; }
+    const id = this.data.localId || store.newLocalId();
+    if (!this.data.localId) this.setData({ localId: id });
+    store.saveDraftLocal(this._draftObj({ dirty: true }));
+    dd.navigateTo({ url: '/pages/factors/factors?draftId=' + id });
+  },
+
   _content() {
     return {
       basic: this.data.form.basic, gps: this.data.gps,
-      subjects: [], subject_levels: {}, asset_conditions: {},
+      subjects: [],
+      subject_levels: this.data.subjectLevels || {},
+      asset_conditions: this.data.assetConditions || {},
       photos: this.data.photos || [],
     };
   },

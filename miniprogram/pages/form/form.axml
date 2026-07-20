@@ -22,6 +22,11 @@
 </view>
 
 <view class="card">
+  <button class="btn-primary" onTap="onFactors">逐因素采集（描述 / 档次）</button>
+  <view class="muted">按类别填区位/实物/权益各因素的现场描述与档次。</view>
+</view>
+
+<view class="card">
   <view class="unsynced" a:if="{{dirty}}">● 有改动未同步（已存本机）{{offline ? '·当前离线' : ''}}</view>
   <view class="synced" a:elif="{{serverStatus === '已提交'}}">✓ 已提交同步</view>
   <view class="muted" a:elif="{{serverStatus === '草稿'}}">已暂存（草稿）{{offline ? '·当前离线' : ''}}</view>
