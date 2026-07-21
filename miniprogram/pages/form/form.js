@@ -59,7 +59,7 @@ Page({
     sync.flush(broker, store);
   },
 
-  // 续填：先本地内容秒回填，再联网对账
+  // 续填/查看：先本地内容秒回填；本地没有(如已提交清过缓存)则从索引取 serverId 回服务端拉。
   resume(id) {
     const isLocal = String(id).indexOf('local-') === 0;
     store.loadDraftLocal(id).then((d) => {
@@ -75,12 +75,20 @@ Page({
           fields: fieldsFor(d.category || ''),
           serverStatus: d.status || '', dirty: !!d.dirty,
         });
-      } else {
-        this.setData({ localId: isLocal ? id : store.newLocalId(),
-          survey_id: isLocal ? '' : id });
+        const sid = d.serverId || (isLocal ? '' : id);
+        if (sid) this._refreshFromServer(sid);
+        return;
       }
-      const sid = (d && d.serverId) || (isLocal ? '' : id);
-      if (sid) this._refreshFromServer(sid);
+      // 本地内容不在：从索引找该条的 serverId，回服务端拉（修「点已提交问卷出空白」）
+      store.readIndex().then((list) => {
+        let sid = isLocal ? '' : id;
+        for (let i = 0; i < list.length; i++) {
+          if (list[i].id === id) { sid = list[i].serverId || sid; break; }
+        }
+        this.setData({ localId: id, survey_id: sid });
+        if (sid) this._refreshFromServer(sid);
+        else this.setData({ msg: '未找到该问卷内容（可能尚未同步到服务端）' });
+      });
     });
   },
 

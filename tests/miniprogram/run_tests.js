@@ -447,6 +447,23 @@ async function main() {
   eq(facAg.data.descs['离水源地距离'], '西溪湿地 约800米', 'G5 离水源地距离←水源事实');
   eq(facAg.data.descs['货车停车便利度'], '周边约4个停车场，最近约120米', 'G5 货车停车便利度←停车场');
 
+  // ===== I. 点「已提交」问卷→从服务端拉内容（修“出空白”bug）=====
+  console.log('I. 已提交问卷从服务端拉取（非空白）');
+  resetEnv();
+  // 模拟提交后状态：索引留轻记录(id=本地lz, serverId=srv-z, 已提交)，本地内容已清，服务端有内容
+  await store.upsertIndexEntry({ id: 'lz', serverId: 'srv-z', category: '商业',
+    status: '已提交', submitted: true, updatedAt: 't', dirty: false });
+  server.state.drafts['srv-z'] = { category: '商业', status: '已提交',
+    content: { basic: { client: '李四' }, subject_levels: { 楼层: '中层' },
+      asset_conditions: {}, photos: [], gps: null } };
+  const pI = makePage(formCfg);
+  pI.onLoad({ draftId: 'lz' });   // data-id 是本地 id，本地内容已清
+  await tick();
+  eq(pI.data.form.basic.client, '李四', 'I 点已提交问卷从服务端拉到内容(非空白)');
+  eq(pI.data.form.category, '商业', 'I 类别正确');
+  eq(pI.data.subjectLevels['楼层'], '中层', 'I 逐因素档次也从服务端回填');
+  eq(pI.data.serverStatus, '已提交', 'I 状态显示已提交');
+
   console.log(`\n结果：${PASS} 通过，${FAIL} 失败`);
   process.exit(FAIL ? 1 : 0);
 }
