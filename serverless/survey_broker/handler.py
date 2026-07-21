@@ -43,6 +43,8 @@ class _Store(Protocol):
 
     def delete(self, survey_id: str) -> None: ...
 
+    def list_by_filler(self, filler: str) -> list[dict[str, Any]]: ...
+
 
 class _Amap(Protocol):
     """`dispatch` 只需要 amap 的这一个方法（`AmapClient` 天然满足）。"""
@@ -121,6 +123,9 @@ def dispatch(
         if action == "loadDraft":
             survey_id = str(_require(payload, "survey_id"))
             return 200, store.load(survey_id)
+        if action == "listSurveys":
+            filler = str(_require(payload, "filler"))
+            return 200, {"surveys": store.list_by_filler(filler)}
         if action == "submit":
             survey_id = str(_require(payload, "survey_id"))
             store.submit(survey_id)

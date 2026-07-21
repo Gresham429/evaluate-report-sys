@@ -113,6 +113,20 @@ class SurveyBrokerStore:
             raise KeyError(f"未找到问卷：{survey_id}")
         self._client.update_record(self._sheet, record_id, {COL_STATUS: STATUS_SUBMITTED})
 
+    def list_by_filler(self, filler: str) -> list[dict[str, Any]]:
+        """某填报人的全部问卷摘要（不含内容）——供手机端「我的问卷」跨设备查看。"""
+        out: list[dict[str, Any]] = []
+        for rec in self._client.list_records(self._sheet):
+            fields = rec.get("fields", {})
+            if str(fields.get(COL_USER, "")) == filler:
+                out.append({
+                    "survey_id": str(fields.get(COL_ID, "")),
+                    "status": str(fields.get(COL_STATUS, "")),
+                    "category": str(fields.get(COL_CATEGORY, "")),
+                    "updated_at": str(fields.get(COL_MTIME, "")),
+                })
+        return out
+
     def delete(self, survey_id: str) -> None:
         """删一份草稿/暂存件。**已提交的拒删**——只增不改的底账语义靠这层守住。
 

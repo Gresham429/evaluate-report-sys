@@ -48,6 +48,13 @@ class FakeStore:
             raise ValueError("已提交问卷不可删除")
         del self.rows[survey_id]
 
+    def list_by_filler(self, filler: str) -> list[dict[str, Any]]:
+        return [
+            {"survey_id": sid, "status": r.get("status", ""),
+             "category": r.get("category", ""), "updated_at": r.get("updated_at", "")}
+            for sid, r in self.rows.items() if r.get("filler") == filler
+        ]
+
 
 class FakeAmap:
     """内存假 amap：够 dispatch 用的 prefill_geo 一个方法。"""
@@ -218,6 +225,27 @@ def test_dispatch_upload_photo_missing_data_returns_400() -> None:
         amap=FakeAmap(),
         identity=FakeIdentity(),
         media=FakeMedia(),
+    )
+    assert status == 400
+    assert "error" in body
+
+
+def test_dispatch_list_surveys_filters_by_filler() -> None:
+    store = FakeStore()
+    store.rows["q1"] = {"survey_id": "q1", "status": "已提交", "filler": "u1", "category": "住宅"}
+    store.rows["q2"] = {"survey_id": "q2", "status": "草稿", "filler": "u2", "category": "商业"}
+    store.rows["q3"] = {"survey_id": "q3", "status": "已提交", "filler": "u1", "category": "农用"}
+    status, body = dispatch(
+        "listSurveys", {"filler": "u1"}, store=store, amap=FakeAmap(), identity=FakeIdentity()
+    )
+    assert status == 200
+    ids = {s["survey_id"] for s in body["surveys"]}
+    assert ids == {"q1", "q3"}   # 只回 u1 的，不含 u2
+
+
+def test_dispatch_list_surveys_missing_filler_400() -> None:
+    status, body = dispatch(
+        "listSurveys", {}, store=FakeStore(), amap=FakeAmap(), identity=FakeIdentity()
     )
     assert status == 400
     assert "error" in body

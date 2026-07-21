@@ -26,9 +26,16 @@ function makeServer() {
     }
     if (a === 'saveDraft') {
       const sid = p.survey_id || ('srv-' + (++state.seq));
-      state.drafts[sid] = { category: p.category, content: clone(p.content),
+      state.drafts[sid] = { category: p.category, content: clone(p.content), filler: p.filler,
         status: (state.drafts[sid] && state.drafts[sid].status) || '草稿', updated_at: p.updated_at };
       return { survey_id: sid };
+    }
+    if (a === 'listSurveys') {
+      const surveys = Object.keys(state.drafts)
+        .filter((sid) => state.drafts[sid].filler === p.filler)
+        .map((sid) => ({ survey_id: sid, status: state.drafts[sid].status,
+          category: state.drafts[sid].category, updated_at: state.drafts[sid].updated_at }));
+      return { surveys };
     }
     if (a === 'submit') { if (state.drafts[p.survey_id]) state.drafts[p.survey_id].status = '已提交'; return { ok: true }; }
     if (a === 'deleteDraft') { delete state.drafts[p.survey_id]; return { ok: true }; }
@@ -234,7 +241,7 @@ async function main() {
   resetEnv();
   await store.writeIndex([{ id: 'lx', serverId: 'srv-x', category: '农用', status: '草稿',
     updatedAt: '2026-07-20T01:00:00Z', dirty: false, submitted: false }]);
-  server.state.drafts['srv-x'] = { category: '农用', status: '已提交', content: {}, updated_at: '2026-07-20T02:00:00Z' };
+  server.state.drafts['srv-x'] = { category: '农用', status: '已提交', content: {}, filler: 'u1', updated_at: '2026-07-20T02:00:00Z' };
   const ix = makePage(indexCfg);
   ix.onShow();
   await tick();
@@ -463,6 +470,24 @@ async function main() {
   eq(pI.data.form.category, '商业', 'I 类别正确');
   eq(pI.data.subjectLevels['楼层'], '中层', 'I 逐因素档次也从服务端回填');
   eq(pI.data.serverStatus, '已提交', 'I 状态显示已提交');
+
+  // ===== J. 跨设备：服务端有我提交的问卷但本地没有→入口页 listSurveys 拉出来 =====
+  console.log('J. 跨设备查看自己提交的问卷');
+  resetEnv();
+  // 本地无任何草稿；服务端有 u1 在别的设备提交的一份
+  server.state.drafts['srv-cd'] = { category: '住宅', status: '已提交', filler: 'u1',
+    updated_at: '2026-07-21T09:00:00Z', content: {} };
+  // 顺带放一份别人(u2)的，验证不会串到 u1
+  server.state.drafts['srv-other'] = { category: '商业', status: '已提交', filler: 'u2',
+    updated_at: 't', content: {} };
+  const ixJ = makePage(indexCfg);
+  ixJ.loadMyDrafts();     // getApp().globalData.filler = 'u1'
+  await tick();
+  eq(ixJ.data.submittedGroups.length, 1, 'J 拉到服务端「我的」问卷(跨设备)');
+  eq(ixJ.data.submittedGroups[0].category, '住宅', 'J 类别正确');
+  eq(ixJ.data.submittedGroups[0].rows[0].survey_id, 'srv-cd', 'J 是我提交的那份');
+  const jAll = ixJ.data.drafts.concat(ixJ.data.submittedGroups.reduce((a, g) => a.concat(g.rows), []));
+  ok(!jAll.some((r) => r.survey_id === 'srv-other'), 'J 不串到别人(u2)的问卷');
 
   console.log(`\n结果：${PASS} 通过，${FAIL} 失败`);
   process.exit(FAIL ? 1 : 0);

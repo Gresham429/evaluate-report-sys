@@ -24,6 +24,7 @@ Page({
             app.globalData.filler = who.userid;
             app.globalData.fillerName = who.name || '';
             this.setData({ filler: who.userid, fillerName: who.name || '' });
+            this.loadMyDrafts();   // 免登拿到 filler 后再拉「我的问卷」(跨设备)
           })
           .catch((e) => this.setData({ authError: e.detail || '未知' }));
       },
@@ -31,22 +32,17 @@ Page({
     });
   },
 
-  // 本地索引秒出 → 联网对账刷新（离线则止于本地）
+  // 本地索引秒出 → 联网拉「我的问卷」(按填报人,含跨设备/别的设备提交的)对账刷新
   loadMyDrafts() {
     store.migrateLegacy().then((list) => {
-      this._render(list);
-      const withServer = list.filter((e) => e.serverId && !e.submitted);
-      if (!withServer.length) return;
-      Promise.all(withServer.map((e) =>
-        broker.request('loadDraft', { survey_id: e.serverId })
-          .then((d) => ({ survey_id: e.serverId, category: d.category,
-            status: d.status || '', updated_at: d.updated_at || '' }))
-          .catch(() => null)
-      )).then((rows) => {
-        const ok = rows.filter(Boolean);
-        if (!ok.length) return;   // 全失败＝离线，保留本地渲染
-        store.reconcileFromServer(ok).then((merged) => this._render(merged));
-      });
+      this._render(list);                    // 本地秒出
+      const filler = app.globalData.filler;
+      if (!filler) return;                   // 免登未完成，先只显本地（auth 完成会再调）
+      broker.request('listSurveys', { filler }).then((r) => {
+        const rows = (r.surveys || []).map((s) => ({ survey_id: s.survey_id,
+          category: s.category, status: s.status || '', updated_at: s.updated_at || '' }));
+        store.reconcileFromServer(rows).then((merged) => this._render(merged));
+      }).catch(() => {});                     // 离线：保留本地渲染
     });
   },
 
