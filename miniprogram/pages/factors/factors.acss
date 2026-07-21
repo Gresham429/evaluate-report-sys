@@ -3,3 +3,5 @@
 .name { display: block; color: #333; margin-bottom: 8rpx; }
 .pick { border: 1rpx solid #ddd; border-radius: 6rpx; padding: 10rpx; color: #333; margin-bottom: 8rpx; }
 .inp { border: 1rpx solid #ddd; border-radius: 6rpx; padding: 10rpx; width: 100%; box-sizing: border-box; }
+.desc { border: 1rpx solid #ddd; border-radius: 6rpx; padding: 12rpx; width: 100%; box-sizing: border-box;
+  min-height: 132rpx; font-size: 28rpx; line-height: 1.5; }

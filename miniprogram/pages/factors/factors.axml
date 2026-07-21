@@ -26,7 +26,7 @@
       <picker range="{{item.levels}}" data-name="{{item.name}}" onChange="onLevel">
         <view class="pick">{{levels[item.name] || '选档次'}}</view>
       </picker>
-      <input class="inp" value="{{descs[item.name]}}" data-name="{{item.name}}" onInput="onDesc" placeholder="现场描述" />
+      <textarea class="desc" value="{{descs[item.name]}}" data-name="{{item.name}}" onInput="onDesc" placeholder="现场描述" auto-height show-count="{{false}}" />
     </view>
   </view>
 </block>
