@@ -35,6 +35,7 @@ class _Store(Protocol):
         category: str,
         updated_at: str,
         content: dict[str, Any],
+        owners: list[str] | None = None,
     ) -> str: ...
 
     def load(self, survey_id: str) -> dict[str, Any]: ...
@@ -112,12 +113,15 @@ def dispatch(
             content = payload.get("content")
             if not isinstance(content, dict):
                 raise ValueError("content 必须是对象")
+            raw_owners = payload.get("owners")
+            owners = [str(x) for x in raw_owners if str(x)] if isinstance(raw_owners, list) else None
             survey_id = store.save_draft(
                 survey_id=payload.get("survey_id"),
                 filler=str(_require(payload, "filler")),
                 category=str(_require(payload, "category")),
                 updated_at=str(_require(payload, "updated_at")),
                 content=content,
+                owners=owners,
             )
             return 200, {"survey_id": survey_id}
         if action == "loadDraft":

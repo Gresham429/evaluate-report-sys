@@ -4,8 +4,11 @@ from typing import Any
 
 import pytest
 
+import json
+
 from serverless.survey_broker.record import (
     COL_ID,
+    COL_OWNERS,
     COL_STATUS,
     STATUS_DRAFT,
     STATUS_FINALIZED,
@@ -190,6 +193,27 @@ def test_save_draft_refused_when_locked(locked: str) -> None:
     loaded = store.load(sid)
     assert loaded["status"] == locked
     assert loaded["updated_at"] == "t1"
+
+
+def test_save_draft_writes_owners() -> None:
+    client = FakeClient()
+    store = SurveyBrokerStore(client, _SHEET)
+    store.save_draft(
+        survey_id=None, filler="u1", category="住宅", updated_at="t",
+        content=_content(), owners=["u1", "u2"],
+    )
+    row = client.list_records(_SHEET)[0]
+    assert json.loads(row["fields"][COL_OWNERS]) == ["u1", "u2"]
+
+
+def test_save_draft_owners_default_to_filler() -> None:
+    client = FakeClient()
+    store = SurveyBrokerStore(client, _SHEET)
+    store.save_draft(
+        survey_id=None, filler="u1", category="住宅", updated_at="t", content=_content(),
+    )
+    row = client.list_records(_SHEET)[0]
+    assert json.loads(row["fields"][COL_OWNERS]) == ["u1"]
 
 
 @pytest.mark.parametrize("locked", [STATUS_PENDING_REVIEW, STATUS_FINALIZED])

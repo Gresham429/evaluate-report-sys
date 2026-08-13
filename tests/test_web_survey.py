@@ -206,13 +206,26 @@ def test_review_endpoint_moves_submitted_to_pending(
 def test_finalize_endpoint_locks_pending(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # 定稿须上级/管理员——用管理员 boss（P1 无组织架构、无上级，故用 admin）
     fake = _wire(
-        monkeypatch, _rows(_resp("1", STATUS_PENDING_REVIEW, "user-7")), operator="user-7"
+        monkeypatch, _rows(_resp("1", STATUS_PENDING_REVIEW, "user-7")),
+        operator="boss", admins=("boss",),
     )
     body = client.post("/api/survey/finalize", json={"survey_ids": ["1"]}).json()
     assert body["ok"] == ["1"]
     assert fake.status_of("1") == STATUS_FINALIZED
-    assert client.get("/api/survey/review/list").json()["surveys"] == []
+
+
+def test_owner_cannot_finalize_via_endpoint(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """owner 从端点定稿自己的 → 无权 → 未 ok、状态不动。"""
+    fake = _wire(
+        monkeypatch, _rows(_resp("1", STATUS_PENDING_REVIEW, "user-7")), operator="user-7"
+    )
+    body = client.post("/api/survey/finalize", json={"survey_ids": ["1"]}).json()
+    assert body["ok"] == []
+    assert fake.status_of("1") == STATUS_PENDING_REVIEW
 
 
 def test_review_cannot_touch_others_survey(

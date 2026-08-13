@@ -57,6 +57,7 @@ class SurveyResponse:
     asset_conditions: dict[str, str]
     photos: tuple[str, ...]
     gps: dict[str, float] | None = None
+    共有人: tuple[str, ...] = ()  # 全体持有者 userid（含填报人）；空=旧数据，读取时兜底 [填报人]
 
     def info(self) -> SurveyInfo:
         """取摘要（丢掉 basic/subjects/照片等大字段）。"""

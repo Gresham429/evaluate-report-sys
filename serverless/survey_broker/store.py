@@ -68,10 +68,12 @@ class SurveyBrokerStore:
         category: str,
         updated_at: str,
         content: dict[str, Any],
+        owners: list[str] | None = None,
     ) -> str:
         """存草稿：给定 ID 且该行存在 → 原行 update；否则新开一行（无 ID 时现生成）。
 
         已进入审核流程（待审核/已定稿）的问卷拒写，护住「已定稿=终态·锁定」（见 `_LOCKED_STATUSES`）。
+        owners=共有人 userid 列表（现场估价师选的），未给兜底 [filler]。
 
         Returns:
             问卷ID（新生成的或沿用传入的）。
@@ -90,6 +92,7 @@ class SurveyBrokerStore:
             category=category,
             updated_at=updated_at,
             content=content,
+            owners=owners,
         )
         if found is not None:
             self._client.update_record(self._sheet, found[0], fields)

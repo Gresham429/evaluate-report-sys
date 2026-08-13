@@ -982,16 +982,16 @@ def create_app() -> FastAPI:
     def survey_list() -> dict[str, object]:
         """列出「实勘问卷」表里的「已提交」问卷（办公端出报告用）。
 
-        可见范围＝`session.visibility_filter()`：普通估价师只看自己、管理员看全部。
+        可见范围＝`session.viewer()`：普通估价师只看自己、管理员看全部。
         """
         backend = _survey_backend()
-        return {"surveys": [asdict(i) for i in backend.list_submitted(session.visibility_filter())]}
+        return {"surveys": [asdict(i) for i in backend.list_submitted(session.viewer())]}
 
     @app.get("/api/survey/review/list")
     def survey_review_list() -> dict[str, object]:
         """列出「待审核」问卷（办公端审核列表用）。普通只看自己、管理员看全部。"""
         backend = _survey_backend()
-        return {"surveys": [asdict(i) for i in backend.list_pending(session.visibility_filter())]}
+        return {"surveys": [asdict(i) for i in backend.list_pending(session.viewer())]}
 
     @app.get("/api/survey/pull")
     def survey_pull(id: str) -> dict[str, object]:
@@ -1002,7 +1002,7 @@ def create_app() -> FastAPI:
         """
         backend = _survey_backend()
         try:
-            response = backend.load(id, session.visibility_filter())
+            response = backend.load(id, session.viewer())
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
@@ -1018,7 +1018,7 @@ def create_app() -> FastAPI:
         """
         ids = [s for s in (str(i) for i in (payload.get("survey_ids") or [])) if s]
         backend = _survey_backend()
-        results = backend.review(ids, session.visibility_filter())
+        results = backend.review(ids, session.viewer())
         return {"results": results, "ok": [k for k, v in results.items() if v == "ok"]}
 
     @app.post("/api/survey/finalize")
@@ -1030,7 +1030,7 @@ def create_app() -> FastAPI:
         """
         ids = [s for s in (str(i) for i in (payload.get("survey_ids") or [])) if s]
         backend = _survey_backend()
-        results = backend.finalize(ids, session.visibility_filter())
+        results = backend.finalize(ids, session.viewer())
         return {"results": results, "ok": [k for k, v in results.items() if v == "ok"]}
 
     @app.get("/api/factors")

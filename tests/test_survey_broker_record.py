@@ -10,17 +10,21 @@ import json
 
 import pytest
 
+from dataclasses import replace
+
 from serverless.survey_broker.record import (
     COL_CATEGORY,
     COL_CONTENT,
     COL_ID,
     COL_MTIME,
+    COL_OWNERS,
     COL_STATUS,
     COL_USER,
     CONTENT_KEYS,
     content_to_fields,
     fields_to_content,
     new_survey_id,
+    owners_from_fields,
 )
 from src.questionnaire.backend import response_to_fields
 from src.questionnaire.model import SurveyResponse
@@ -66,7 +70,9 @@ def test_content_to_fields_matches_office_contract_columns_and_json() -> None:
         content=_content_of(response),
     )
 
-    expected_columns = {COL_ID, COL_STATUS, COL_USER, COL_MTIME, COL_CATEGORY, COL_CONTENT}
+    expected_columns = {
+        COL_ID, COL_STATUS, COL_USER, COL_OWNERS, COL_MTIME, COL_CATEGORY, COL_CONTENT,
+    }
     assert set(office) == expected_columns
     assert set(broker) == expected_columns
     # 列名相同前提下，同一份数据两边编码出来的 fields 应该字节级一致（含「问卷内容」JSON 字符串）。
@@ -155,3 +161,34 @@ def test_status_constants_match_across_broker_and_office() -> None:
     assert broker.STATUS_SUBMITTED == office.STATUS_SUBMITTED == "已提交"
     assert broker.STATUS_PENDING_REVIEW == office.STATUS_PENDING_REVIEW == "待审核"
     assert broker.STATUS_FINALIZED == office.STATUS_FINALIZED == "已定稿"
+
+
+def test_owners_column_parity_broker_vs_office() -> None:
+    """共有人列两侧编码一致（同一份 owners → 同一 JSON 字符串）。"""
+    r = replace(_sample_response(), 共有人=("张三", "李四"))
+    office = response_to_fields(r)
+    broker = content_to_fields(
+        survey_id=r.问卷ID, status=r.状态, filler=r.填报人, category=r.category,
+        updated_at=r.更新时间, content=_content_of(r), owners=["张三", "李四"],
+    )
+    assert office[COL_OWNERS] == broker[COL_OWNERS]
+    assert json.loads(str(office[COL_OWNERS])) == ["张三", "李四"]
+
+
+def test_owners_default_to_filler_when_none() -> None:
+    """未给共有人时两侧都兜底 [填报人]。"""
+    r = _sample_response()  # 共有人=()
+    office = response_to_fields(r)
+    broker = content_to_fields(
+        survey_id=r.问卷ID, status=r.状态, filler=r.填报人, category=r.category,
+        updated_at=r.更新时间, content=_content_of(r),
+    )
+    assert office[COL_OWNERS] == broker[COL_OWNERS]
+    assert json.loads(str(office[COL_OWNERS])) == [r.填报人]
+
+
+def test_owners_from_fields_fallback_and_parse() -> None:
+    assert owners_from_fields({COL_USER: "王五"}) == ["王五"]  # 无共有人列 → 兜底填报人
+    assert owners_from_fields({COL_USER: "王五", COL_OWNERS: json.dumps(["a", "b"])}) == ["a", "b"]
+    assert owners_from_fields({COL_USER: "王五", COL_OWNERS: "坏json"}) == ["王五"]  # 坏 → 兜底
+    assert owners_from_fields({COL_USER: "王五", COL_OWNERS: "[]"}) == ["王五"]  # 空 → 兜底

@@ -19,6 +19,7 @@ class FakeStore:
         category: str,
         updated_at: str,
         content: dict[str, Any],
+        owners: list[str] | None = None,
     ) -> str:
         sid = survey_id or "generated-id"
         self.rows[sid] = {
@@ -28,6 +29,7 @@ class FakeStore:
             "category": category,
             "updated_at": updated_at,
             "content": content,
+            "owners": owners,
         }
         return sid
 

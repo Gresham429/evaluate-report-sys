@@ -12,7 +12,7 @@ class FakeStore:
 
     def save_draft(
         self, *, survey_id: str | None, filler: str, category: str,
-        updated_at: str, content: dict[str, Any],
+        updated_at: str, content: dict[str, Any], owners: list[str] | None = None,
     ) -> str:
         sid = survey_id or "new-id"
         self.saved[sid] = content

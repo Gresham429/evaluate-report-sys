@@ -16,6 +16,7 @@
 import logging
 
 from src.dingtalk import config
+from src.questionnaire.permissions import Viewer
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ __all__ = [
     "is_logged_in",
     "operator_name",
     "set_operator",
-    "visibility_filter",
+    "viewer",
 ]
 
 # 运行期会话：登录后存 {"operator": userid, "operator_name": 名字}；登录中存 {"oauth_state": ...}。
@@ -89,16 +90,14 @@ def is_admin() -> bool:
     return bool(op) and op in config.office_admins()
 
 
-def visibility_filter() -> str | None:
-    """当前操作人能看到的问卷范围，喂给 `SurveyPullBackend` 的 `filler`：
+def viewer() -> Viewer:
+    """当前请求的判定上下文（喂给 `SurveyPullBackend` 逐份判 can_see/can_edit/can_finalize）。
 
-    - `""` 识别不出操作人 → fail-closed（什么都看不到）；
-    - `None` 管理员 → 看全部、可审核任何人（不过滤，即「部门领导看下属」简化版）；
-    - `userid` 普通估价师 → 只看自己。
-
-    出报告列表、审核列表、拉取、批量审核/定稿全用它，故普通人一律只看自己、管理员一律看全部。
+    operator=当前登录人 userid（会话或 .env 过渡，"" 表认不出→fail-closed）；is_admin=在
+    OFFICE_ADMINS 名单；**subordinates=下属集（P1 恒空，P2 由 org 模块按钉钉部门树填）**。
     """
-    op = current_operator()
-    if not op:
-        return ""
-    return None if op in config.office_admins() else op
+    return Viewer(
+        operator=current_operator(),
+        is_admin=is_admin(),
+        subordinates=frozenset(),  # P1：组织架构未接，无上级/下属
+    )

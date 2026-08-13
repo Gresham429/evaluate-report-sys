@@ -21,6 +21,7 @@ __all__ = [
     "COL_CONTENT",
     "COL_ID",
     "COL_MTIME",
+    "COL_OWNERS",
     "COL_STATUS",
     "COL_USER",
     "CONTENT_KEYS",
@@ -31,11 +32,13 @@ __all__ = [
     "content_to_fields",
     "fields_to_content",
     "new_survey_id",
+    "owners_from_fields",
 ]
 
 COL_ID = "问卷ID"
 COL_STATUS = "状态"
-COL_USER = "填报人"
+COL_USER = "填报人"  # 创建人/主填报（单个）
+COL_OWNERS = "共有人"  # userid 列表(JSON)：全体持有者，含填报人。可见性/权限以它为准
 COL_MTIME = "更新时间"
 COL_CATEGORY = "类别"
 COL_CONTENT = "问卷内容"
@@ -58,17 +61,40 @@ def content_to_fields(
     category: str,
     updated_at: str,
     content: dict[str, Any],
+    owners: list[str] | None = None,
 ) -> dict[str, object]:
-    """问卷字段 → 多维表一行 fields。须与 `response_to_fields` 字节级一致。"""
+    """问卷字段 → 多维表一行 fields。须与 `response_to_fields` 字节级一致。
+
+    owners 未给时兜底 [filler]（填报人恒为持有者）；给了就照写（须已含 filler）。
+    """
     body = {k: content.get(k) for k in CONTENT_KEYS}
+    owner_list = list(owners) if owners else [filler]
     return {
         COL_ID: survey_id,
         COL_STATUS: status,
         COL_USER: filler,
+        COL_OWNERS: json.dumps(owner_list, ensure_ascii=False),
         COL_MTIME: updated_at,
         COL_CATEGORY: category,
         COL_CONTENT: json.dumps(body, ensure_ascii=False),
     }
+
+
+def owners_from_fields(fields: dict[str, Any]) -> list[str]:
+    """一行 fields → 共有人列表；缺/坏/空 → 兜底 [填报人]（旧行无此列时迁移友好）。"""
+    raw = fields.get(COL_OWNERS)
+    owners: list[str] = []
+    if raw:
+        try:
+            parsed = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            parsed = None
+        if isinstance(parsed, list):
+            owners = [str(x) for x in parsed if str(x)]
+    if not owners:
+        filler = str(fields.get(COL_USER, ""))
+        owners = [filler] if filler else []
+    return owners
 
 
 def fields_to_content(fields: dict[str, Any]) -> dict[str, Any]:
