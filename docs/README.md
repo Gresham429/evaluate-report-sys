@@ -99,6 +99,35 @@ app 启动 load `.env`；`GET /api/online` 三态（本地／多维表在线／�
 **broker 服务端也拒写**（防离线补传把已定稿退回草稿）。**步骤 2–5 已实现全绿**（681 项 + 小程序 harness 103 + 办公端浏览器实测）；
 **步骤 6 办公端钉钉扫码登录**用户定「先真机验这批再做」，仍待。交付前须真机点审核全流程 + broker 重部署（含 store.py 锁定）+ 小程序重传。
 
+## 1c. 2026-08 本轮：审核定稿 / 权限 / 扫码登录 / 双向同步（现状 + 待办）
+
+承 §1b 智能实勘问卷，本轮补齐「问卷进来之后」的流程。**权威设计＝统一 spec**：
+[`2026-08-13-统一owner-可见性-合并-设计`](superpowers/specs/2026-08-13-统一owner-可见性-合并-设计.md)
+（owner/可见性/合并的唯一真相；其它 spec 与它冲突处以它为准）。
+
+**已实现并提交（main 本地未 push、全绿 713 pytest + 小程序 harness 103）：**
+- **审核定稿 + 批量**：草稿→已提交→(发起审核)→待审核→(审核通过)→已定稿(终态·锁定)；办公端「审核」页签；
+  broker 服务端拒写锁定态。[spec](superpowers/specs/2026-07-21-审核定稿+办公端钉钉登录+权限-design.md)
+- **权限（共有人 ACL + 三判定）**：问卷加「共有人」列；**可见=owner/上级/管理员、发起审核=owner、定稿=上级/管理员**；
+  `permissions.py`(Viewer) + `session.viewer()` + 后端逐份判 + 端点。[ACL spec](superpowers/specs/2026-08-13-问卷共有人ACL+上级可见-design.md)
+- **办公端钉钉扫码登录**（**真机验通**）：纯本机 OAuth2（`127.0.0.1/auth/callback` 已在钉钉后台存上）；
+  `src/dingtalk/oauth.py`（登录得 unionId → `getbyunionid` 换 userid，与填报人同源）+ `/auth/*` + 顶栏登录态。
+  [spec](superpowers/specs/2026-08-13-办公端钉钉扫码登录-design.md)
+- **时区**：办公端时间戳按浏览器本地时区显示（修 UTC 早 8 小时）。
+
+**待办（按依赖/优先排）：**
+1. **拉取重复草稿去重**（办公端小改、不依赖部署）：草稿存 `survey_id`、拉取幂等（同一问卷回同一份草稿）。统一 spec §4。
+   ⚠️ 现状：拉同一问卷 N 次 = N 份草稿、且与问卷失联。
+2. **小程序「选共有人」UI**（钉钉通讯录选人 API 待校准）→ 须小程序重传。统一 spec §7。
+3. **双向同步：回写 + 字段级 3-way 合并 + 冲突弹窗**（办公端+小程序+broker）→ 须重部署+重传。
+   [sync spec](superpowers/specs/2026-08-12-问卷报告双向同步-design.md) + 统一 spec §3/§5。
+4. **组织架构上级**（`org.py` 接钉钉部门树，填 `Viewer.subordinates`；P1 恒空）→ 钉钉 org API 待校准。统一 spec §8。
+5. **实勘编号 自动领号**：⛔ **留空待甲方定机制**。[留空 spec](superpowers/specs/2026-08-14-实勘编号自动领号-留空待甲方.md)
+6. **交付前**：broker 重部署（含 store.py 锁定 + listSurveys + owners）+ 小程序重传 + 真机点审核全流程/登录/只看自己 + `/code-review ultra`。
+
+**⚠ 部署现状**：阿里云 FC broker 线上仍是旧版（缺 listSurveys + 已定稿锁定 + owners）——`serverless/dist/survey_broker_fc.zip`
+已重打好，待你重传到 FC。
+
 ## 2. 铁律：改任何东西之前必须知道，碰了就是回归
 
 这些是几轮讨论 + 评审沉淀下来的**不可违反的约束**。每一条都有测试或决策记录背书。
