@@ -6,7 +6,10 @@
 from src.model import Category
 from src.questionnaire.backend import SurveyPullBackend, response_to_fields
 from src.questionnaire.model import STATUS_SUBMITTED, SurveyResponse
+from src.questionnaire.permissions import Viewer
 from src.questionnaire.prefill import survey_to_prefill
+
+_ADMIN = Viewer(operator="root", is_admin=True)
 
 
 class FakeNotableClient:
@@ -47,10 +50,10 @@ def test_end_to_end_submitted_to_prefill() -> None:
     client.insert_records(SHEET, [response_to_fields(_submitted())])
 
     backend = SurveyPullBackend(client, SHEET)
-    infos = backend.list_submitted()
+    infos = backend.list_submitted(_ADMIN)
     assert [i.问卷ID for i in infos] == ["q-end"]
 
-    response = backend.load("q-end")
+    response = backend.load("q-end", _ADMIN)
     out = survey_to_prefill(response)
     project = out["project"]
 
