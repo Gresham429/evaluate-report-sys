@@ -15,6 +15,7 @@
 import json
 import logging
 import os
+import secrets
 import shutil
 import tempfile
 from dataclasses import asdict, replace
@@ -23,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from starlette.background import BackgroundTask
 
 from src.dingtalk import config
@@ -46,6 +47,7 @@ from src.extractor.condition import GROUP_PREFIXES, read_survey_conditions
 from src.extractor.project import load_project
 from src.questionnaire.backend import SurveyPullBackend
 from src.questionnaire.prefill import survey_to_prefill
+from src.web import session
 from src.knowledge_base.store import (
     DEFAULT_STORE_DIR as DEFAULT_BASE_TABLE_DIR,
 )
@@ -925,26 +927,111 @@ def create_app() -> FastAPI:
             "面积单位": area_unit(project.category),
         }
 
+    @app.get("/api/me")
+    def whoami() -> dict[str, object]:
+        """当前办公端操作人：会话优先、否则 .env 过渡值（供前端显示登录态、做「只看自己」）。"""
+        return {
+            "operator": session.current_operator(),
+            "operator_name": session.operator_name(),
+            "logged_in": session.is_logged_in(),
+            "is_admin": session.is_admin(),
+        }
+
+    # ── 钉钉扫码登录（纯本机 OAuth2；见 spec 2026-08-13-办公端钉钉扫码登录）──
+    @app.get("/auth/login")
+    def auth_login() -> RedirectResponse:
+        """跳钉钉扫码授权页。生成一次性 state 存会话防 CSRF。"""
+        oauth = config.build_oauth()
+        if oauth is None:
+            raise HTTPException(status_code=409, detail="未配应用凭据（YIDA_APP_KEY/SECRET），无法登录")
+        state = secrets.token_urlsafe(16)
+        session.begin_login(state)
+        return RedirectResponse(oauth.build_auth_url(config.login_redirect_uri(), state))
+
+    @app.get("/auth/callback")
+    def auth_callback(authCode: str = "", code: str = "", state: str = "") -> RedirectResponse:  # noqa: N803  钉钉回调参数名 authCode
+        """钉钉回调：校 state → 换 token → 取 unionId → 换 userid → 记会话。
+
+        userid 与问卷「填报人」同源（免登 userid），故必须走 unionId→userid 那步。
+        """
+        if not session.consume_login_state(state):
+            raise HTTPException(status_code=400, detail="登录态校验失败（state 不符），请重新登录")
+        auth_code = authCode or code
+        if not auth_code:
+            raise HTTPException(status_code=400, detail="回调缺 authCode")
+        oauth = config.build_oauth()
+        client = config.build_client()
+        if oauth is None or client is None:
+            raise HTTPException(status_code=409, detail="未配应用凭据，无法登录")
+        try:
+            user_token = oauth.exchange(auth_code)
+            info = oauth.me(user_token)
+            userid = oauth.userid_by_union(client.access_token(), info["unionid"])
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=f"登录失败：{exc}") from exc
+        session.set_operator(userid, info.get("name", ""))
+        return RedirectResponse("/")
+
+    @app.get("/auth/logout")
+    def auth_logout() -> RedirectResponse:
+        """登出：清会话（之后回退 .env 过渡身份）。"""
+        session.clear_operator()
+        return RedirectResponse("/")
+
     @app.get("/api/survey/list")
     def survey_list() -> dict[str, object]:
-        """列出多维表「实勘问卷」表里所有「已提交」的问卷（办公端拉取用）。"""
+        """列出「实勘问卷」表里的「已提交」问卷（办公端出报告用）。
+
+        可见范围＝`session.visibility_filter()`：普通估价师只看自己、管理员看全部。
+        """
         backend = _survey_backend()
-        return {"surveys": [asdict(i) for i in backend.list_submitted()]}
+        return {"surveys": [asdict(i) for i in backend.list_submitted(session.visibility_filter())]}
+
+    @app.get("/api/survey/review/list")
+    def survey_review_list() -> dict[str, object]:
+        """列出「待审核」问卷（办公端审核列表用）。普通只看自己、管理员看全部。"""
+        backend = _survey_backend()
+        return {"surveys": [asdict(i) for i in backend.list_pending(session.visibility_filter())]}
 
     @app.get("/api/survey/pull")
     def survey_pull(id: str) -> dict[str, object]:
-        """拉取一份「已提交」问卷，返回与 /api/extract 同形状的预填 payload。
+        """拉取一份**本人**的「已提交」问卷，返回与 /api/extract 同形状的预填 payload。
 
         估价师据此免二次录入；比较法输出留空，仍由其选实例后重算（铁律 #7）。
+        非本人问卷按「不存在」处理（404，不泄露他人问卷是否存在）。
         """
         backend = _survey_backend()
         try:
-            response = backend.load(id)
+            response = backend.load(id, session.visibility_filter())
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return survey_to_prefill(response)
+
+    @app.post("/api/survey/review")
+    def survey_review(payload: dict[str, Any]) -> dict[str, object]:
+        """批量发起审核：把本人选中的若干「已提交」问卷改为「待审核」。
+
+        body: {"survey_ids": [...]}。逐条给结果（ok / 原因），只有 ok 的真改了状态；
+        非本人 / 非「已提交」/ 不存在 的都跳过、不动库。
+        """
+        ids = [s for s in (str(i) for i in (payload.get("survey_ids") or [])) if s]
+        backend = _survey_backend()
+        results = backend.review(ids, session.visibility_filter())
+        return {"results": results, "ok": [k for k, v in results.items() if v == "ok"]}
+
+    @app.post("/api/survey/finalize")
+    def survey_finalize(payload: dict[str, Any]) -> dict[str, object]:
+        """批量审核通过：把本人选中的若干「待审核」问卷改为「已定稿」（终态·锁定）。
+
+        body: {"survey_ids": [...]}。本期「审核通过」不做角色鉴权——谁登录谁能点（占位，
+        引入组织架构后限部门领导，见设计 §2/§5）。逐条给结果，非「待审核」的跳过。
+        """
+        ids = [s for s in (str(i) for i in (payload.get("survey_ids") or [])) if s]
+        backend = _survey_backend()
+        results = backend.finalize(ids, session.visibility_filter())
+        return {"results": results, "ok": [k for k, v in results.items() if v == "ok"]}
 
     @app.get("/api/factors")
     def factors(category: str, fingerprint: str | None = None) -> dict[str, object]:

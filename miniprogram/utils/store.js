@@ -6,6 +6,17 @@ var INDEX_KEY = 'draftIndex';
 var DRAFT_PREFIX = 'draft:';
 var LEGACY_KEY = 'myDrafts';
 
+// 状态生命周期（与办公端/broker 同：草稿→已提交→待审核→已定稿）。
+// 「已提交类」进入口页「已提交」分组、不可删；「只读类」整份不可再改。
+var SUBMITTED_STATUSES = ['已提交', '待审核', '已定稿'];
+var READONLY_STATUSES = ['待审核', '已定稿'];
+
+/** 是否算「已提交」类（进已提交分组、不可删）：已提交/待审核/已定稿都算。 */
+function isSubmittedStatus(s) { return SUBMITTED_STATUSES.indexOf(s) >= 0; }
+
+/** 是否整份只读（已进入审核流程，不可再改）：待审核/已定稿。草稿/已提交仍可改。 */
+function isReadonlyStatus(s) { return READONLY_STATUSES.indexOf(s) >= 0; }
+
 /** 浅合并 a、b（b 覆盖 a）；不用 Object.assign 以免运行时差异。 */
 function assign(a, b) {
   var o = {};
@@ -95,7 +106,7 @@ function saveDraftLocal(draft) {
       updatedAt: draft.updatedAt || '',
       dirty: !!draft.dirty,
       needsSync: !!draft.needsSync,
-      submitted: draft.status === '已提交',
+      submitted: isSubmittedStatus(draft.status),
     });
   }).then(function () { return draft; });
 }
@@ -147,13 +158,13 @@ function reconcileFromServer(rows) {
           found.category = r.category || found.category;
           found.status = r.status || found.status;
           found.updatedAt = r.updated_at || found.updatedAt;
-          found.submitted = (r.status === '已提交') || found.submitted;
+          found.submitted = isSubmittedStatus(r.status) || found.submitted;
         }
       } else {
         list.push({
           id: r.survey_id, serverId: r.survey_id, category: r.category || '',
           status: r.status || '', updatedAt: r.updated_at || '',
-          dirty: false, submitted: r.status === '已提交',
+          dirty: false, submitted: isSubmittedStatus(r.status),
         });
       }
     }
@@ -217,6 +228,7 @@ function migrateLegacy() {
 
 module.exports = {
   assign: assign,
+  isSubmittedStatus: isSubmittedStatus, isReadonlyStatus: isReadonlyStatus,
   getStorage: getStorage, setStorage: setStorage, removeStorage: removeStorage,
   newLocalId: newLocalId,
   readIndex: readIndex, writeIndex: writeIndex, upsertIndexEntry: upsertIndexEntry,

@@ -16,6 +16,8 @@ from serverless.survey_broker.record import (
     COL_STATUS,
     COL_USER,
     STATUS_DRAFT,
+    STATUS_FINALIZED,
+    STATUS_PENDING_REVIEW,
     STATUS_SUBMITTED,
     content_to_fields,
     fields_to_content,
@@ -23,6 +25,12 @@ from serverless.survey_broker.record import (
 )
 
 __all__ = ["RecordWriter", "SurveyBrokerStore"]
+
+# 已进入审核流程、服务端拒绝再写的状态：待审核/已定稿。
+# 客户端（小程序）已把这两态置只读，但那只是前端提示——真正的「已定稿=终态·锁定」
+# 必须由服务端兜底：否则手机离线时打开一份已定稿问卷、拉取失败没锁上、改完联网补传，
+# saveDraft/submit 会把它退回草稿/已提交并覆盖内容。这里在写入口挡死。
+_LOCKED_STATUSES = (STATUS_PENDING_REVIEW, STATUS_FINALIZED)
 
 
 class RecordWriter(Protocol):
@@ -44,12 +52,12 @@ class SurveyBrokerStore:
         self._client = client
         self._sheet = sheet
 
-    def _record_id(self, survey_id: str) -> str | None:
-        """按问卷ID找行 id（不筛状态——草稿/已提交都能命中）。找不到给 None。"""
+    def _find(self, survey_id: str) -> tuple[str, str] | None:
+        """按问卷ID找 (行id, 当前状态)（不筛状态——草稿/已提交/待审核/已定稿都命中）。找不到给 None。"""
         for rec in self._client.list_records(self._sheet):
             fields = rec.get("fields", {})
             if str(fields.get(COL_ID, "")) == survey_id:
-                return str(rec.get("id"))
+                return str(rec.get("id")), str(fields.get(COL_STATUS, ""))
         return None
 
     def save_draft(
@@ -63,11 +71,18 @@ class SurveyBrokerStore:
     ) -> str:
         """存草稿：给定 ID 且该行存在 → 原行 update；否则新开一行（无 ID 时现生成）。
 
+        已进入审核流程（待审核/已定稿）的问卷拒写，护住「已定稿=终态·锁定」（见 `_LOCKED_STATUSES`）。
+
         Returns:
             问卷ID（新生成的或沿用传入的）。
+
+        Raises:
+            ValueError: 该问卷已待审核/已定稿，不可修改（映射 400）。
         """
         sid = survey_id or new_survey_id()
-        record_id = self._record_id(sid)
+        found = self._find(sid)
+        if found is not None and found[1] in _LOCKED_STATUSES:
+            raise ValueError(f"问卷已{found[1]}，不可修改")
         fields = content_to_fields(
             survey_id=sid,
             status=STATUS_DRAFT,
@@ -76,8 +91,8 @@ class SurveyBrokerStore:
             updated_at=updated_at,
             content=content,
         )
-        if record_id is not None:
-            self._client.update_record(self._sheet, record_id, fields)
+        if found is not None:
+            self._client.update_record(self._sheet, found[0], fields)
         else:
             self._client.insert_record(self._sheet, fields)
         return sid
@@ -103,15 +118,18 @@ class SurveyBrokerStore:
         raise KeyError(f"未找到问卷：{survey_id}")
 
     def submit(self, survey_id: str) -> None:
-        """把某问卷状态改成已提交。
+        """把某问卷状态改成已提交。已待审核/已定稿的拒绝再提交（终态锁定）。
 
         Raises:
             KeyError: 没有该 ID 的行。
+            ValueError: 该问卷已待审核/已定稿，不可再提交（映射 400）。
         """
-        record_id = self._record_id(survey_id)
-        if record_id is None:
+        found = self._find(survey_id)
+        if found is None:
             raise KeyError(f"未找到问卷：{survey_id}")
-        self._client.update_record(self._sheet, record_id, {COL_STATUS: STATUS_SUBMITTED})
+        if found[1] in _LOCKED_STATUSES:
+            raise ValueError(f"问卷已{found[1]}，不可再提交")
+        self._client.update_record(self._sheet, found[0], {COL_STATUS: STATUS_SUBMITTED})
 
     def list_by_filler(self, filler: str) -> list[dict[str, Any]]:
         """某填报人的全部问卷摘要（不含内容）——供手机端「我的问卷」跨设备查看。"""

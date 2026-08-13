@@ -36,7 +36,8 @@ Page({
     photos: [], pendingPhotos: [],       // 采集页拥有；表单只随草稿带上传/持久
     subjectLevels: {}, assetConditions: {},  // 逐因素页拥有：档次 / 描述
     msg: '',
-    serverStatus: '',       // 载入/存过后的服务端状态：草稿 / 已提交
+    serverStatus: '',       // 载入/存过后的服务端状态：草稿 / 已提交 / 待审核 / 已定稿
+    readonly: false,        // 已进入审核流程（待审核/已定稿）→ 整份只读，不可再改
     dirty: false,           // 本地有改动、尚未成功同步（驱动「未同步」徽标）
     offline: false,         // 上一次网络操作失败（数据已在本机）
     needsSync: false,       // 点过暂存/提交但未成功——离线补传只认这个（防把没保存的草稿也推上去）
@@ -74,6 +75,7 @@ Page({
           catIndex: Math.max(0, CATEGORIES.indexOf(d.category)),
           fields: fieldsFor(d.category || ''),
           serverStatus: d.status || '', dirty: !!d.dirty,
+          readonly: store.isReadonlyStatus(d.status || ''),
         });
         const sid = d.serverId || (isLocal ? '' : id);
         if (sid) this._refreshFromServer(sid);
@@ -95,7 +97,9 @@ Page({
   // 联网用服务端版本对账（本地有未同步改动时不覆盖，护住现场输入）
   _refreshFromServer(sid) {
     broker.request('loadDraft', { survey_id: sid }).then((d) => {
-      if (this.data.dirty) { this.setData({ offline: false }); return; }
+      const ro = store.isReadonlyStatus(d.status || '');
+      // 服务端已进入审核/定稿即锁定：即便本地有 dirty（不覆盖其内容），也把表单置只读。
+      if (this.data.dirty) { this.setData({ offline: false, readonly: ro }); return; }
       const c = d.content || {};
       const draft = {
         id: this.data.localId || sid, serverId: sid,
@@ -114,6 +118,7 @@ Page({
         catIndex: Math.max(0, CATEGORIES.indexOf(draft.category)),
         fields: fieldsFor(draft.category || ''),
         serverStatus: draft.status, dirty: false, offline: false,
+        readonly: ro,
       });
     }).catch(() => this.setData({ offline: true }));
   },
@@ -138,18 +143,28 @@ Page({
     store.saveDraftLocal(this._draftObj({ dirty: true }));
   },
 
+  // 只读（待审核/已定稿）时提示不可改；用于 onSave/onSubmit/onCapture/onFactors 的统一挡口。
+  _lockedGuard() {
+    if (!this.data.readonly) return false;
+    this.setData({ msg: this.data.serverStatus === '已定稿' ? '已定稿，不可修改' : '审核中，不可修改' });
+    return true;
+  },
+
   onCategory(e) {
+    if (this.data.readonly) return;   // 只读时忽略（UI 上 picker 也已 disabled）
     const cat = CATEGORIES[e.detail.value];
     this.setData({ catIndex: e.detail.value, 'form.category': cat, fields: fieldsFor(cat) });
     this._autosave();
   },
   onField(e) {
+    if (this.data.readonly) return;   // 只读时忽略（UI 上 input 也已 disabled）
     this.setData({ ['form.basic.' + e.currentTarget.dataset.key]: e.detail.value });
     this._autosave();
   },
 
   // 进现场采集页（拍照 + 地图预填）；先把当前基本字段落盘，采集页据同一 localId 读写。
   onCapture() {
+    if (this._lockedGuard()) return;   // 只读：不让进采集页
     const id = this.data.localId || store.newLocalId();
     if (!this.data.localId) this.setData({ localId: id });
     store.saveDraftLocal(this._draftObj({ dirty: true }));
@@ -158,6 +173,7 @@ Page({
 
   // 进逐因素页（按类别填描述+档次）；须先选类别。
   onFactors() {
+    if (this._lockedGuard()) return;   // 只读：不让进逐因素页
     if (!this.data.form.category) { this.setData({ msg: '请先选类别再填逐因素' }); return; }
     const id = this.data.localId || store.newLocalId();
     if (!this.data.localId) this.setData({ localId: id });
@@ -185,6 +201,7 @@ Page({
   },
 
   onSave() {
+    if (this._lockedGuard()) return;
     if (!this.data.form.category) { this.setData({ msg: '请先选类别' }); return; }
     // needsSync 置真并落本机（保证不丢；离线时后台会据此补传），再走统一 syncOne。
     this.setData({ needsSync: true, pendingSubmit: false });
@@ -200,6 +217,7 @@ Page({
   },
 
   onSubmit() {
+    if (this._lockedGuard()) return;
     if (!this.data.form.category) { this.setData({ msg: '请先选类别' }); return; }
     this.setData({ needsSync: true, pendingSubmit: true });   // 提交意图黏住，离线补传据此 submit
     store.saveDraftLocal(this._draftObj({ dirty: true }));

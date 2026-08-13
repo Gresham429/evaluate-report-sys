@@ -4,7 +4,14 @@ from typing import Any
 
 import pytest
 
-from serverless.survey_broker.record import COL_ID, STATUS_DRAFT, STATUS_SUBMITTED
+from serverless.survey_broker.record import (
+    COL_ID,
+    COL_STATUS,
+    STATUS_DRAFT,
+    STATUS_FINALIZED,
+    STATUS_PENDING_REVIEW,
+    STATUS_SUBMITTED,
+)
 from serverless.survey_broker.store import SurveyBrokerStore
 
 _SHEET = "实勘问卷"
@@ -155,3 +162,44 @@ def test_delete_missing_raises_keyerror() -> None:
     store = SurveyBrokerStore(FakeClient(), _SHEET)
     with pytest.raises(KeyError):
         store.delete("ghost")
+
+
+def _set_status(client: FakeClient, survey_id: str, status: str) -> None:
+    """模拟办公端把某问卷改到某状态（直接改底层行）。"""
+    for rec in client.list_records(_SHEET):
+        if rec["fields"][COL_ID] == survey_id:
+            client.update_record(_SHEET, rec["id"], {COL_STATUS: status})
+            return
+    raise AssertionError(f"no such survey {survey_id}")
+
+
+@pytest.mark.parametrize("locked", [STATUS_PENDING_REVIEW, STATUS_FINALIZED])
+def test_save_draft_refused_when_locked(locked: str) -> None:
+    """已进入审核流程（待审核/已定稿）的问卷，服务端拒绝再写——护住终态锁定。"""
+    client = FakeClient()
+    store = SurveyBrokerStore(client, _SHEET)
+    sid = store.save_draft(
+        survey_id=None, filler="张三", category="住宅", updated_at="t1", content=_content()
+    )
+    _set_status(client, sid, locked)
+    with pytest.raises(ValueError, match=locked):
+        store.save_draft(
+            survey_id=sid, filler="张三", category="住宅", updated_at="t2", content=_content()
+        )
+    # 拒写后状态与更新时间都不动（离线补传不会把已定稿退回草稿）
+    loaded = store.load(sid)
+    assert loaded["status"] == locked
+    assert loaded["updated_at"] == "t1"
+
+
+@pytest.mark.parametrize("locked", [STATUS_PENDING_REVIEW, STATUS_FINALIZED])
+def test_submit_refused_when_locked(locked: str) -> None:
+    client = FakeClient()
+    store = SurveyBrokerStore(client, _SHEET)
+    sid = store.save_draft(
+        survey_id=None, filler="李四", category="工业", updated_at="t1", content=_content()
+    )
+    _set_status(client, sid, locked)
+    with pytest.raises(ValueError, match=locked):
+        store.submit(sid)
+    assert store.load(sid)["status"] == locked

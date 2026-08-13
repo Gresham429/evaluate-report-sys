@@ -1,7 +1,12 @@
+<view class="card" a:if="{{readonly}}">
+  <view class="synced" a:if="{{serverStatus === '已定稿'}}">✓ 已定稿 · 不可修改</view>
+  <view class="muted" a:else>⏳ {{serverStatus}} · 审核中，不可修改</view>
+</view>
+
 <view class="card">
   <view class="row">
     <text class="label">类别</text>
-    <picker onChange="onCategory" data-key="category" range="{{categories}}" value="{{catIndex}}">
+    <picker onChange="onCategory" disabled="{{readonly}}" data-key="category" range="{{categories}}" value="{{catIndex}}">
       <view class="pick">{{form.category || '请选择'}}</view>
     </picker>
   </view>
@@ -10,26 +15,30 @@
 <view class="card">
   <view class="row" a:for="{{fields}}" key="{{item.key}}">
     <text class="label">{{item.label}}</text>
-    <input class="inp" value="{{form.basic[item.key]}}" data-key="{{item.key}}" onInput="onField" placeholder="填写" />
+    <input class="inp" value="{{form.basic[item.key]}}" data-key="{{item.key}}" onInput="onField" disabled="{{readonly}}" placeholder="{{readonly ? '' : '填写'}}" />
   </view>
 </view>
 
-<view class="card">
+<view class="card" a:if="{{!readonly}}">
   <button class="btn-primary" onTap="onCapture">现场拍照</button>
   <view class="muted">照片 {{photos.length}} 已传{{pendingPhotos.length ? ('、' + pendingPhotos.length + ' 待传') : ''}}</view>
 </view>
 
-<view class="card">
+<view class="card" a:if="{{!readonly}}">
   <button class="btn-primary" onTap="onFactors">逐因素采集（描述 / 档次 / 地图预填）</button>
   <view class="muted">按类别填区位/实物/权益各因素；地图预填会自动填入对应区位因素的描述。</view>
   <view class="muted" a:if="{{geo.address}}">地址：{{geo.address}}</view>
 </view>
 
-<view class="card">
+<view class="card" a:if="{{!readonly}}">
   <view class="unsynced" a:if="{{dirty}}">● 有改动未同步（已存本机）{{offline ? '·当前离线' : ''}}</view>
   <view class="synced" a:elif="{{serverStatus === '已提交'}}">✓ 已提交同步</view>
   <view class="muted" a:elif="{{serverStatus === '草稿'}}">已暂存（草稿）{{offline ? '·当前离线' : ''}}</view>
   <button onTap="onSave">暂存</button>
   <button class="btn-primary" onTap="onSubmit">提交</button>
   <view class="muted" a:if="{{msg}}">{{msg}}</view>
+</view>
+
+<view class="card" a:if="{{readonly && msg}}">
+  <view class="muted">{{msg}}</view>
 </view>

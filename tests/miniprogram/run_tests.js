@@ -489,6 +489,50 @@ async function main() {
   const jAll = ixJ.data.drafts.concat(ixJ.data.submittedGroups.reduce((a, g) => a.concat(g.rows), []));
   ok(!jAll.some((r) => r.survey_id === 'srv-other'), 'J 不串到别人(u2)的问卷');
 
+  // ===== K. 已定稿/待审核 整份只读（不可改、不进采集/逐因素、提交不动服务端）=====
+  console.log('K. 已定稿/待审核只读');
+  resetEnv();
+  await store.upsertIndexEntry({ id: 'lk', serverId: 'srv-k', category: '住宅',
+    status: '已定稿', submitted: true, updatedAt: 't', dirty: false });
+  server.state.drafts['srv-k'] = { category: '住宅', status: '已定稿', filler: 'u1',
+    content: { basic: { client: '王五' }, subject_levels: {}, asset_conditions: {}, photos: [], gps: null } };
+  const pK = makePage(formCfg);
+  pK.onLoad({ draftId: 'lk' });   // 本地内容不在 → 从服务端拉，_refreshFromServer 置只读
+  await tick();
+  ok(pK.data.readonly === true, 'K1 已定稿载入即只读');
+  eq(pK.data.serverStatus, '已定稿', 'K1 状态=已定稿');
+  eq(pK.data.form.basic.client, '王五', 'K1 只读仍能看到已填内容');
+  const kNavBefore = env.spies.navTo.length;
+  pK.onCapture();
+  pK.onFactors();
+  pK.onSubmit();
+  await tick();
+  eq(env.spies.navTo.length, kNavBefore, 'K2 只读时不进采集/逐因素页');
+  eq(server.state.drafts['srv-k'].status, '已定稿', 'K2 只读时点提交不改服务端状态');
+
+  // 待审核同样只读
+  resetEnv();
+  await store.upsertIndexEntry({ id: 'lk2', serverId: 'srv-k2', category: '办公',
+    status: '待审核', submitted: true, updatedAt: 't', dirty: false });
+  server.state.drafts['srv-k2'] = { category: '办公', status: '待审核', filler: 'u1',
+    content: { basic: {}, subject_levels: {}, asset_conditions: {}, photos: [], gps: null } };
+  const pK2 = makePage(formCfg);
+  pK2.onLoad({ draftId: 'lk2' });
+  await tick();
+  ok(pK2.data.readonly === true, 'K3 待审核也整份只读');
+
+  // 已提交仍可改（非只读）
+  resetEnv();
+  await store.upsertIndexEntry({ id: 'lk3', serverId: 'srv-k3', category: '商业',
+    status: '已提交', submitted: true, updatedAt: 't', dirty: false });
+  server.state.drafts['srv-k3'] = { category: '商业', status: '已提交', filler: 'u1',
+    content: { basic: {}, subject_levels: {}, asset_conditions: {}, photos: [], gps: null } };
+  const pK3 = makePage(formCfg);
+  pK3.onLoad({ draftId: 'lk3' });
+  await tick();
+  ok(pK3.data.readonly === false, 'K4 已提交仍可改（非只读）');
+  ok(store.isSubmittedStatus('待审核') && store.isSubmittedStatus('已定稿'), 'K5 待审核/已定稿都算已提交类（进已提交分组）');
+
   console.log(`\n结果：${PASS} 通过，${FAIL} 失败`);
   process.exit(FAIL ? 1 : 0);
 }

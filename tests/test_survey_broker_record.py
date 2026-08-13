@@ -139,3 +139,19 @@ def test_new_survey_id_is_12_hex_chars_and_unique() -> None:
     assert a != b
     assert len(a) == 12
     int(a, 16)  # 应是合法十六进制
+
+
+def test_status_constants_match_across_broker_and_office() -> None:
+    """四态生命周期：两侧状态常量逐一对齐。
+
+    办公端与 serverless broker 是同一份状态机的两个抄本，任一侧改了状态值另一侧不跟，
+    办公端读出来的状态就会跟 broker 写进去的对不上（审核列表拉空、只读误判）。这里把
+    四个状态常量对拍，钉死漂移。
+    """
+    from serverless.survey_broker import record as broker
+    from src.questionnaire import model as office
+
+    assert broker.STATUS_DRAFT == office.STATUS_DRAFT == "草稿"
+    assert broker.STATUS_SUBMITTED == office.STATUS_SUBMITTED == "已提交"
+    assert broker.STATUS_PENDING_REVIEW == office.STATUS_PENDING_REVIEW == "待审核"
+    assert broker.STATUS_FINALIZED == office.STATUS_FINALIZED == "已定稿"

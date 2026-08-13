@@ -65,6 +65,9 @@
   }
   .masthead .sub { margin: .1rem 0 0; color: var(--ink-3); font-size: .78rem; letter-spacing: .04em; }
   .masthead-id { margin-left: auto; text-align: right; }
+  .loginbox { font-size: .78rem; color: var(--ink-3); white-space: nowrap; margin-bottom: .25rem; }
+  .loginbox a { color: var(--seal); text-decoration: none; }
+  .loginbox a:hover { text-decoration: underline; }
   .rule-double { border-top: 2px solid var(--ink); margin-bottom: 2px; }
   .rule-double + .rule-thin { border-top: 1px solid var(--ink); }
 
@@ -300,7 +303,10 @@
       <h1>房地产估价报告生成系统</h1>
       <p class="sub">与钉钉多维表同步 · 台账 / 实例库 / 基础表 / 实勘问卷统一承载</p>
     </div>
-    <div class="masthead-id" id="masthead-id"></div>
+    <div style="margin-left:auto; text-align:right">
+      <div id="loginBox" class="loginbox"></div>
+      <div class="masthead-id" id="masthead-id"></div>
+    </div>
   </header>
   <div class="rule-double"></div>
   <div class="rule-thin"></div>
@@ -310,6 +316,7 @@
     <button data-tab="library">实例库</button>
     <button data-tab="base">基础表</button>
     <button data-tab="ledger">台账</button>
+    <button data-tab="review">审核</button>
   </nav>
 
   <!-- ═══════════════ 出报告 ═══════════════ -->
@@ -513,6 +520,37 @@
       <div id="ledgerDetail"></div>
     </section>
   </main>
+
+  <!-- ═══════════════ 审核 ═══════════════ -->
+  <main class="page" id="page-review" hidden>
+    <section class="panel">
+      <h2>审核定稿 <span class="sub">普通只看自己·管理员看全部 · 发起审核 → 审核通过（定稿·锁定）</span></h2>
+      <div class="note">
+        <strong>当前操作人</strong>：<span id="reviewOperator">…</span><br>
+        流程：已提交 →（选中「批量发起审核」）→ 待审核 →（选中「批量审核通过」）→
+        <strong>已定稿（终态，锁定不可再改）</strong>。本期「审核通过」谁登录谁能点（部门领导鉴权待组织架构接入）。
+      </div>
+      <div class="err" id="reviewError" hidden></div>
+    </section>
+
+    <section class="panel">
+      <h3>待发起审核（已提交） <button type="button" id="reviewRefresh" style="width:auto;font-size:.8rem">刷新</button></h3>
+      <div id="submittedList"><span class="status">加载中……</span></div>
+      <div class="actions" id="submittedActions" hidden>
+        <label><input type="checkbox" id="submittedAll"> 全选</label>
+        <button type="button" id="startReviewBtn" class="primary">批量发起审核</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h3>待审核</h3>
+      <div id="pendingList"><span class="status">加载中……</span></div>
+      <div class="actions" id="pendingActions" hidden>
+        <label><input type="checkbox" id="pendingAll"> 全选</label>
+        <button type="button" id="finalizeBtn" class="primary">批量审核通过（定稿）</button>
+      </div>
+    </section>
+  </main>
 </div>
 
 <script>
@@ -521,6 +559,16 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// 时间戳（小程序/后端存的是 UTC ISO，带 Z）→ 按浏览器本地时区显示「YYYY-MM-DD HH:MM」。
+// 不转的话北京用户会看到早 8 小时的 UTC 时间（13:26 其实是本地 21:26）。
+function fmtTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso).slice(0, 16).replace('T', ' ');  // 非法时间原样兜底
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 // ── 状态 ──────────────────────────────────────────────────
 let currentProject = null;   // 唯一的项目状态，/api/render 提交的就是它
@@ -589,12 +637,97 @@ const EMPTY_SUBJECT = (index) => ({
 document.querySelectorAll('nav.tabs button').forEach((btn) => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('nav.tabs button').forEach((b) => b.classList.toggle('on', b === btn));
-    ['report', 'library', 'base', 'ledger'].forEach((p) => { $('page-' + p).hidden = p !== btn.dataset.tab; });
+    ['report', 'library', 'base', 'ledger', 'review'].forEach((p) => { $('page-' + p).hidden = p !== btn.dataset.tab; });
     if (btn.dataset.tab === 'library') loadLibrary();
     if (btn.dataset.tab === 'base') loadBaseAccordion();
     if (btn.dataset.tab === 'ledger') loadLedger();
+    if (btn.dataset.tab === 'review') loadReview();
   });
 });
+
+// ── 审核定稿（只看自己 · 批量发起审核 / 审核通过）───────────
+// 两个清单：待发起审核（已提交）→ /api/survey/review；待审核 → /api/survey/finalize。
+// 各自多选 + 全选；批量端点逐条返回 ok/原因，据此局部刷新并回报跳过项。
+async function loadReview() {
+  $('reviewError').hidden = true;
+  try {
+    const me = await (await fetch('/api/me')).json();
+    const role = me.is_admin ? '（管理员·查看全部）'
+      : (me.logged_in ? '（已登录·只看自己）' : '（.env 过渡取值·只看自己）');
+    $('reviewOperator').textContent = (me.operator || '（未识别）') + role;
+  } catch (e) { $('reviewOperator').textContent = '（读取失败）'; }
+  await Promise.all([loadSubmittedForReview(), loadPendingForReview()]);
+}
+
+// 拉一份清单并渲染成带复选框的行；空清单给占位文案。
+function renderReviewRows(container, surveys, cls) {
+  if (!surveys.length) {
+    container.innerHTML = '<div class="note">暂无。</div>';
+    return false;
+  }
+  container.innerHTML = surveys.map((s) =>
+    `<label style="display:block;margin:4px 0;padding:6px 8px;border:1px solid var(--rule-2);border-radius:4px">
+       <input type="checkbox" class="${cls}" value="${esc(s.问卷ID)}">
+       <b>${esc(s.category)}</b> · 填报人 ${esc(s.填报人)} ·
+       ${esc(fmtTime(s.更新时间))}
+       <span style="opacity:.6">（${esc(s.问卷ID)}）</span>
+     </label>`).join('');
+  return true;
+}
+
+async function loadSubmittedForReview() {
+  const box = $('submittedList');
+  let r;
+  try { r = await fetch('/api/survey/list'); }
+  catch (e) { box.innerHTML = '<div class="note">无法连接服务。</div>'; $('submittedActions').hidden = true; return; }
+  if (!r.ok) { box.innerHTML = '<div class="note">加载失败：' + esc((await r.json()).detail) + '</div>'; $('submittedActions').hidden = true; return; }
+  const any = renderReviewRows(box, (await r.json()).surveys, 'submittedPick');
+  $('submittedActions').hidden = !any;
+  $('submittedAll').checked = false;
+}
+
+async function loadPendingForReview() {
+  const box = $('pendingList');
+  let r;
+  try { r = await fetch('/api/survey/review/list'); }
+  catch (e) { box.innerHTML = '<div class="note">无法连接服务。</div>'; $('pendingActions').hidden = true; return; }
+  if (!r.ok) { box.innerHTML = '<div class="note">加载失败：' + esc((await r.json()).detail) + '</div>'; $('pendingActions').hidden = true; return; }
+  const any = renderReviewRows(box, (await r.json()).surveys, 'pendingPick');
+  $('pendingActions').hidden = !any;
+  $('pendingAll').checked = false;
+}
+
+function checkedIds(cls) {
+  return Array.from(document.querySelectorAll('.' + cls + ':checked')).map((c) => c.value);
+}
+
+// 批量提交 + 报告跳过项（非本人/状态不符/不存在）；成功后重载两清单。
+async function postBatch(url, ids, actionLabel) {
+  $('reviewError').hidden = true;
+  if (!ids.length) { $('reviewError').textContent = '请先勾选要' + actionLabel + '的问卷。'; $('reviewError').hidden = false; return; }
+  let r;
+  try { r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ survey_ids: ids }) }); }
+  catch (e) { $('reviewError').textContent = actionLabel + '失败：无法连接服务。'; $('reviewError').hidden = false; return; }
+  if (!r.ok) { $('reviewError').textContent = actionLabel + '失败：' + esc((await r.json()).detail); $('reviewError').hidden = false; return; }
+  const body = await r.json();
+  const skipped = Object.entries(body.results || {}).filter(([, v]) => v !== 'ok');
+  if (skipped.length) {
+    $('reviewError').textContent = '已' + actionLabel + ' ' + (body.ok || []).length + ' 份；跳过 '
+      + skipped.map(([id, why]) => id + '（' + why + '）').join('、');
+    $('reviewError').hidden = false;
+  }
+  await Promise.all([loadSubmittedForReview(), loadPendingForReview()]);
+}
+
+$('reviewRefresh').addEventListener('click', loadReview);
+$('submittedAll').addEventListener('change', (e) =>
+  document.querySelectorAll('.submittedPick').forEach((c) => { c.checked = e.target.checked; }));
+$('pendingAll').addEventListener('change', (e) =>
+  document.querySelectorAll('.pendingPick').forEach((c) => { c.checked = e.target.checked; }));
+$('startReviewBtn').addEventListener('click', () =>
+  postBatch('/api/survey/review', checkedIds('submittedPick'), '发起审核'));
+$('finalizeBtn').addEventListener('click', () =>
+  postBatch('/api/survey/finalize', checkedIds('pendingPick'), '审核通过'));
 
 function markStep(id) {
   document.querySelectorAll('#page-report .step').forEach((s) => s.classList.toggle('on', s.id === id));
@@ -665,7 +798,7 @@ async function loadDraftList() {
           ${pending ? '<span class="chip chip-no">⏳待同步</span>' : ''}
           ${editing ? '<span class="chip chip-seal">编辑中</span>' : ''}
         </span>
-        <span class="ver">${esc(d.更新时间.slice(0, 16).replace('T', ' '))}</span>
+        <span class="ver">${esc(fmtTime(d.更新时间))}</span>
         ${pending ? `<button type="button" class="mini" data-sync="${esc(d.id)}" ${canSync ? '' : 'disabled title="离线，联网后可同步"'}>同步定稿</button>
         <button type="button" class="mini" data-drop="${esc(d.id)}">删除</button>`
         : (editing ? '' : `<button type="button" class="mini" data-draft="${esc(d.id)}">续填</button>
@@ -866,7 +999,7 @@ $('surveyBtn').addEventListener('click', async () => {
     `<button type="button" class="surveyRow" data-id="${esc(s.问卷ID)}"
        style="display:block;width:100%;text-align:left;margin:4px 0;padding:8px">
        <b>${esc(s.category)}</b> · 填报人 ${esc(s.填报人)} ·
-       ${esc((s.更新时间 || '').slice(0, 16).replace('T', ' '))}
+       ${esc(fmtTime(s.更新时间))}
        <span style="opacity:.6">（${esc(s.问卷ID)}）</span>
      </button>`).join('');
 });
@@ -1998,4 +2131,21 @@ document.addEventListener('click', (event) => {
 // ── 启动 ──────────────────────────────────────────────────
 loadDraftList();
 checkOnline();
+loadLoginBox();
+
+// 顶栏登录态：真登录→「👤名字·退出」；未登录→「钉钉登录」(+ .env 过渡身份提示)。
+async function loadLoginBox() {
+  let me;
+  try { me = await (await fetch('/api/me')).json(); } catch (e) { return; }
+  const box = $('loginBox');
+  if (!box) return;
+  if (me.logged_in) {
+    box.innerHTML = `👤 ${esc(me.operator_name || me.operator)}${me.is_admin ? '（管理员）' : ''}`
+      + ` · <a href="/auth/logout">退出</a>`;
+  } else {
+    const who = me.operator
+      ? `（当前 ${esc(me.operator)}${me.is_admin ? '·管理员' : ''}，来自 .env）` : '';
+    box.innerHTML = `<a href="/auth/login">钉钉登录</a> ${who}`;
+  }
+}
 </script>

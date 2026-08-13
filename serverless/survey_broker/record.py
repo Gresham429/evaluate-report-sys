@@ -25,6 +25,8 @@ __all__ = [
     "COL_USER",
     "CONTENT_KEYS",
     "STATUS_DRAFT",
+    "STATUS_FINALIZED",
+    "STATUS_PENDING_REVIEW",
     "STATUS_SUBMITTED",
     "content_to_fields",
     "fields_to_content",
@@ -40,6 +42,8 @@ COL_CONTENT = "问卷内容"
 
 STATUS_DRAFT = "草稿"
 STATUS_SUBMITTED = "已提交"
+STATUS_PENDING_REVIEW = "待审核"  # 办公端「发起审核」后：已提交 → 待审核
+STATUS_FINALIZED = "已定稿"  # 办公端「审核通过」后：待审核 → 已定稿（终态·锁定）
 
 # 「问卷内容」JSON 的六个顶层键，顺序与 response_to_fields 里的 content 字面量一致
 # （json.dumps 按插入顺序写键，两侧顺序不一致会导致契约测试的字符串比较误报）。
