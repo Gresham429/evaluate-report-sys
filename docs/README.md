@@ -123,7 +123,7 @@ app 启动 load `.env`；`GET /api/online` 三态（本地／多维表在线／�
 2. **小程序「选共有人」UI**（钉钉通讯录选人 API 待校准）→ 须小程序重传。统一 spec §7。
 3. **双向同步：回写 + 字段级 3-way 合并 + 冲突弹窗** — **Phase 1 办公端✅已做**（2026-08-14，本地未 push）：
    `merge_content`（两侧镜像+契约对拍）、`/api/survey/writeback`、办公端「保存回问卷」+冲突弹窗（Playwright 冒烟通过）。
-   **Phase 2 broker 代码✅已写**（`save_draft` 合并+`SurveyConflict`，待随部署上线）；**仍待小程序侧**（form.js/store.js 带 base + 冲突页，须重传）。
+   **Phase 2✅代码全就绪**（2026-08-14）：broker `save_draft` 合并+`SurveyConflict`；小程序 `sync.js` 带 base+冲突处理+`resolveConflict`、`form.js` 捕获 base、新增 `pages/conflict/`（harness 121 通过）。**仍待：broker 重部署（若尚未）+ 小程序重传 + 真机联调**。
    见 [plan](superpowers/plans/2026-08-14-双向同步.md) + [sync spec](superpowers/specs/2026-08-12-问卷报告双向同步-design.md)。
 4. **组织架构上级**（`org.py` 接钉钉部门树，填 `Viewer.subordinates`；P1 恒空）→ 钉钉 org API 待校准。统一 spec §8。
 5. **实勘编号 自动领号**：⛔ **留空待甲方定机制**。[留空 spec](superpowers/specs/2026-08-14-实勘编号自动领号-留空待甲方.md)

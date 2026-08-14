@@ -10,6 +10,30 @@ const path = require('path');
 const clone = (x) => (x === undefined ? undefined : JSON.parse(JSON.stringify(x)));
 const tick = async (n = 8) => { for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r)); };
 
+// broker 三方合并的 JS 测试替身（对拍权威在 Python：src/serverless 的 merge.py + test_survey_merge.py）。
+// 只为在无真机时驱动小程序的「带 base → 合并/冲突 → 解决」流程，返回形状与 broker 一致。
+function mergeContentJS(base, mine, theirs) {
+  const SECTIONS = ['basic', 'subject_levels', 'asset_conditions'];
+  const merged = {}, conflicts = [];
+  SECTIONS.forEach((sec) => {
+    const b = base[sec] || {}, m = mine[sec] || {}, t = theirs[sec] || {};
+    const keys = {}; [b, m, t].forEach((dd_) => Object.keys(dd_).forEach((k) => { keys[k] = 1; }));
+    const out = {};
+    Object.keys(keys).forEach((k) => {
+      const bv = b[k], mv = m[k], tv = t[k];
+      let chosen;
+      if (mv === bv) chosen = tv;
+      else if (tv === bv) chosen = mv;
+      else if (mv === tv) chosen = mv;
+      else { conflicts.push({ field: sec + '.' + k, base: bv, mine: mv, theirs: tv }); chosen = mv; }
+      if (chosen !== undefined && chosen !== null) out[k] = chosen;
+    });
+    merged[sec] = out;
+  });
+  ['subjects', 'photos', 'gps'].forEach((sec) => { merged[sec] = theirs[sec]; });
+  return { merged, conflicts };
+}
+
 let PASS = 0, FAIL = 0;
 function ok(cond, msg) { if (cond) { PASS++; } else { FAIL++; console.log('  ✗ FAIL: ' + msg); } }
 function eq(a, b, msg) { ok(JSON.stringify(a) === JSON.stringify(b), msg + ` (got ${JSON.stringify(a)}, want ${JSON.stringify(b)})`); }
@@ -25,6 +49,29 @@ function makeServer() {
         name: p.name };
     }
     if (a === 'saveDraft') {
+      const existed = p.survey_id ? state.drafts[p.survey_id] : null;
+      // 双向同步：带 base 且行已存在 → 走三方合并（同 broker）；否则整份写入。
+      if (p.base && existed) {
+        const r = mergeContentJS(p.base, clone(p.content), existed.content || {});
+        let unresolved = r.conflicts;
+        if (p.resolutions) {
+          unresolved = [];
+          r.conflicts.forEach((c) => {
+            if (Object.prototype.hasOwnProperty.call(p.resolutions, c.field)) {
+              const dot = c.field.indexOf('.');
+              const sec = c.field.slice(0, dot), key = c.field.slice(dot + 1);
+              r.merged[sec] = r.merged[sec] || {};
+              r.merged[sec][key] = p.resolutions[c.field];
+            } else unresolved.push(c);
+          });
+        }
+        if (unresolved.length) {
+          return { status: 'conflict', conflicts: unresolved, theirs_mtime: existed.updated_at || '' };
+        }
+        state.drafts[p.survey_id] = { category: p.category, content: r.merged, filler: p.filler,
+          status: existed.status || '草稿', updated_at: p.updated_at };
+        return { survey_id: p.survey_id };
+      }
       const sid = p.survey_id || ('srv-' + (++state.seq));
       state.drafts[sid] = { category: p.category, content: clone(p.content), filler: p.filler,
         status: (state.drafts[sid] && state.drafts[sid].status) || '草稿', updated_at: p.updated_at };
@@ -94,20 +141,30 @@ function installEnv(server) {
 // ---- Page/getApp/getCurrentPages 打桩 ----
 let lastCfg = null;
 global.Page = (cfg) => { lastCfg = cfg; };
-global.getApp = () => ({ globalData: { filler: 'u1', fillerName: '薛焱', BASE_URL: '' } });
+// 单例 app（贴真机：getApp() 全程返回同一对象），好让 form.js 与 conflict.js 共享
+// globalData.pendingConflict（冲突跳转的传参）。
+const APP = { globalData: { filler: 'u1', fillerName: '薛焱', BASE_URL: '', pendingConflict: null } };
+global.getApp = () => APP;
 global.getCurrentPages = () => [{}];               // length 1 → 提交后走 reLaunch
 global.setTimeout = (fn) => { fn(); return 0; };    // 自动退出回调同步执行，便于断言
 
+// setData 路径解析：支持 a.b.c、a[0]、a[0].b 混合（贴真机 setData 语义）。
+function _pathTokens(k) {
+  return k.replace(/\[(\d+)\]/g, '.$1').split('.')
+    .filter((s) => s !== '')
+    .map((s) => (/^\d+$/.test(s) ? parseInt(s, 10) : s));
+}
 function applySetData(data, patch) {
   for (const k of Object.keys(patch)) {
-    if (k.indexOf('.') >= 0) {
-      const parts = k.split('.'); let o = data;
-      for (let i = 0; i < parts.length - 1; i++) {
-        if (o[parts[i]] == null || typeof o[parts[i]] !== 'object') o[parts[i]] = {};
-        o = o[parts[i]];
-      }
-      o[parts[parts.length - 1]] = patch[k];
-    } else data[k] = patch[k];
+    const toks = _pathTokens(k);
+    if (toks.length === 1) { data[toks[0]] = patch[k]; continue; }
+    let o = data;
+    for (let i = 0; i < toks.length - 1; i++) {
+      const t = toks[i];
+      if (o[t] == null || typeof o[t] !== 'object') o[t] = (typeof toks[i + 1] === 'number') ? [] : {};
+      o = o[t];
+    }
+    o[toks[toks.length - 1]] = patch[k];
   }
 }
 function makePage(cfg) {
@@ -532,6 +589,102 @@ async function main() {
   await tick();
   ok(pK3.data.readonly === false, 'K4 已提交仍可改（非只读）');
   ok(store.isSubmittedStatus('待审核') && store.isSubmittedStatus('已定稿'), 'K5 待审核/已定稿都算已提交类（进已提交分组）');
+
+  // ===== L. 双向同步：带 base 三方合并 + 冲突逐字段解决 =====
+  console.log('L. 双向同步（带 base 合并 + 冲突解决）');
+
+  // L1 不同字段并发 → 自动合并，两处都保住；成功后底版推进
+  resetEnv();
+  server.state.drafts['srv-L'] = { category: '办公', status: '已提交', filler: 'u1', updated_at: 't1',
+    content: { basic: { a: '1', b: '1' }, subjects: [], subject_levels: {}, asset_conditions: {}, photos: [], gps: null } };
+  await store.saveDraftLocal({ id: 'local-L', serverId: 'srv-L', category: '办公', filler: 'u1',
+    basic: { a: 'phone', b: '1' }, subjectLevels: {}, assetConditions: {}, photos: [], gps: null,
+    base: { basic: { a: '1', b: '1' }, subjects: [], subject_levels: {}, asset_conditions: {}, photos: [], gps: null },
+    updatedAt: 't2', needsSync: true });
+  server.state.drafts['srv-L'].content.basic.b = 'server';   // 办公端并发改 b
+  const rL = await sync.syncOne(broker, store, 'local-L');
+  ok(!rL.conflict, 'L1 不同字段并发 → 无冲突');
+  eq(server.state.drafts['srv-L'].content.basic.a, 'phone', 'L1 手机改的 a 保住');
+  eq(server.state.drafts['srv-L'].content.basic.b, 'server', 'L1 办公改的 b 保住（未被覆盖）');
+  d = await store.loadDraftLocal('local-L');
+  eq(d.base.basic.a, 'phone', 'L1 成功后底版推进为已发送内容');
+
+  // L2 同字段双改 → 冲突、未写库
+  resetEnv();
+  server.state.drafts['srv-M'] = { category: '办公', status: '已提交', filler: 'u1', updated_at: 't1',
+    content: { basic: { a: '1' }, subjects: [], subject_levels: {}, asset_conditions: {}, photos: [], gps: null } };
+  await store.saveDraftLocal({ id: 'local-M', serverId: 'srv-M', category: '办公', filler: 'u1',
+    basic: { a: 'phone' }, subjectLevels: {}, assetConditions: {}, photos: [], gps: null,
+    base: { basic: { a: '1' }, subjects: [], subject_levels: {}, asset_conditions: {}, photos: [], gps: null },
+    updatedAt: 't2', needsSync: true });
+  server.state.drafts['srv-M'].content.basic.a = 'server';
+  const rM = await sync.syncOne(broker, store, 'local-M');
+  ok(rM.conflict === true, 'L2 同字段双改 → 冲突');
+  eq(rM.conflicts[0].field, 'basic.a', 'L2 冲突字段 basic.a');
+  eq(server.state.drafts['srv-M'].content.basic.a, 'server', 'L2 冲突未写库（线上仍 server）');
+
+  // L3 resolveConflict 选线上 → 写入所选、本地也更新
+  const rM2 = await sync.resolveConflict(broker, store, 'local-M', { 'basic.a': 'server' });
+  ok(!rM2.conflict, 'L3 解决后成功');
+  eq(server.state.drafts['srv-M'].content.basic.a, 'server', 'L3 选线上 → 写入 server');
+  d = await store.loadDraftLocal('local-M');
+  eq(d.basic.a, 'server', 'L3 本地内容更到所选值');
+
+  // L4 首个草稿无 base → 整份插入（向后兼容）+ 成功后建立底版
+  resetEnv();
+  await store.saveDraftLocal({ id: 'local-N', category: '办公', filler: 'u1',
+    basic: { a: 'x' }, subjectLevels: {}, assetConditions: {}, photos: [], gps: null,
+    updatedAt: 't', needsSync: true });
+  const rN = await sync.syncOne(broker, store, 'local-N');
+  ok(!rN.conflict && rN.survey_id, 'L4 无 base 首存 → 正常插入');
+  d = await store.loadDraftLocal('local-N');
+  ok(d.base && d.base.basic.a === 'x', 'L4 首存成功后建立底版');
+
+  // L5 flush 遇冲突：计入 conflicts、不计 synced
+  resetEnv();
+  server.state.drafts['srv-P'] = { category: '办公', status: '已提交', filler: 'u1', updated_at: 't1',
+    content: { basic: { a: '1' }, subjects: [], subject_levels: {}, asset_conditions: {}, photos: [], gps: null } };
+  await store.saveDraftLocal({ id: 'local-P', serverId: 'srv-P', category: '办公', filler: 'u1',
+    basic: { a: 'phone' }, subjectLevels: {}, assetConditions: {}, photos: [], gps: null,
+    base: { basic: { a: '1' }, subjects: [], subject_levels: {}, asset_conditions: {}, photos: [], gps: null },
+    updatedAt: 't2', needsSync: true });
+  server.state.drafts['srv-P'].content.basic.a = 'server';
+  const fl = await sync.flush(broker, store);
+  eq(fl.conflicts, 1, 'L5 flush 统计冲突数');
+  eq(fl.synced, 0, 'L5 冲突不计入已同步');
+
+  // L6 form.js 从服务端载入即捕获 base
+  resetEnv();
+  server.state.drafts['srv-Q'] = { category: '办公', status: '已提交', filler: 'u1', updated_at: 't1',
+    content: { basic: { a: 'srv' }, subjects: [], subject_levels: {}, asset_conditions: {}, photos: [], gps: null } };
+  await store.upsertIndexEntry({ id: 'srv-Q', serverId: 'srv-Q', category: '办公', status: '已提交', submitted: true });
+  const pL = makePage(formCfg);
+  pL.onLoad({ draftId: 'srv-Q' });
+  await tick();
+  ok(pL.data.base && pL.data.base.basic.a === 'srv', 'L6 从服务端载入即捕获底版 base');
+
+  // L7 冲突页：选线上确认 → resolveConflict 写入、清 pendingConflict
+  require(path.join(__dirname, '../../miniprogram/pages/conflict/conflict.js'));
+  const conflictCfg = lastCfg;
+  resetEnv();
+  server.state.drafts['srv-R'] = { category: '办公', status: '已提交', filler: 'u1', updated_at: 't1',
+    content: { basic: { a: 'server' }, subjects: [], subject_levels: {}, asset_conditions: {}, photos: [], gps: null } };
+  await store.saveDraftLocal({ id: 'local-R', serverId: 'srv-R', category: '办公', filler: 'u1',
+    basic: { a: 'phone' }, subjectLevels: {}, assetConditions: {}, photos: [], gps: null,
+    base: { basic: { a: '1' }, subjects: [], subject_levels: {}, asset_conditions: {}, photos: [], gps: null },
+    updatedAt: 't2', needsSync: true });
+  getApp().globalData.pendingConflict = { draftId: 'local-R',
+    conflicts: [{ field: 'basic.a', base: '1', mine: 'phone', theirs: 'server' }] };
+  const pConf = makePage(conflictCfg);
+  pConf.onLoad();
+  await tick();
+  eq(pConf.data.items.length, 1, 'L7 冲突页列出 1 条');
+  pConf.onPick({ currentTarget: { dataset: { idx: 0, which: 'theirs' } } });   // 选线上
+  await tick();
+  pConf.onConfirm();
+  await tick();
+  eq(server.state.drafts['srv-R'].content.basic.a, 'server', 'L7 选线上确认 → 写入 server 值');
+  ok(getApp().globalData.pendingConflict === null, 'L7 解决后清空 pendingConflict');
 
   console.log(`\n结果：${PASS} 通过，${FAIL} 失败`);
   process.exit(FAIL ? 1 : 0);

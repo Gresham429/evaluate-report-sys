@@ -1,0 +1,12 @@
+.opt {
+  padding: 18rpx 20rpx;
+  margin: 10rpx 0;
+  border: 1px solid #ddd;
+  border-radius: 10rpx;
+  color: #333;
+}
+.opt-on {
+  border-color: #1677ff;
+  background: #eaf2ff;
+  color: #0a4bd0;
+}

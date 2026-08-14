@@ -1,0 +1,20 @@
+<view class="card">
+  <view class="sec">问卷有冲突，请逐项选择保留哪个</view>
+  <view class="muted" a:if="{{!items.length}}">没有待解决的冲突。</view>
+</view>
+
+<view class="card" a:for="{{items}}" a:for-item="it" a:for-index="idx" key="{{it.field}}">
+  <view class="name">{{it.label}}</view>
+  <view class="opt {{it.choice === 'mine' ? 'opt-on' : ''}}" data-idx="{{idx}}" data-which="mine" onTap="onPick">
+    你的：{{it.mine}}
+  </view>
+  <view class="opt {{it.choice === 'theirs' ? 'opt-on' : ''}}" data-idx="{{idx}}" data-which="theirs" onTap="onPick">
+    线上：{{it.theirs}}
+  </view>
+</view>
+
+<view class="card">
+  <button class="btn-primary" onTap="onConfirm" a:if="{{items.length}}">用所选合并保存</button>
+  <button onTap="onCancel">取消</button>
+  <view class="muted" a:if="{{msg}}">{{msg}}</view>
+</view>

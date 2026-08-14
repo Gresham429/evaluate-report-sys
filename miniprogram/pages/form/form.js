@@ -35,6 +35,7 @@ Page({
     localId: '', survey_id: '', gps: null, geo: {},
     photos: [], pendingPhotos: [],       // 采集页拥有；表单只随草稿带上传/持久
     subjectLevels: {}, assetConditions: {},  // 逐因素页拥有：档次 / 描述
+    base: null,             // 双向同步：上次同服务端一致的内容底版，保存时带上让 broker 三方合并
     msg: '',
     serverStatus: '',       // 载入/存过后的服务端状态：草稿 / 已提交 / 待审核 / 已定稿
     readonly: false,        // 已进入审核流程（待审核/已定稿）→ 整份只读，不可再改
@@ -72,6 +73,7 @@ Page({
           gps: d.gps || null, geo: d.geo || {},
           photos: d.photos || [], pendingPhotos: d.pendingPhotos || [],
           subjectLevels: d.subjectLevels || {}, assetConditions: d.assetConditions || {},
+          base: d.base || null,
           catIndex: Math.max(0, CATEGORIES.indexOf(d.category)),
           fields: fieldsFor(d.category || ''),
           serverStatus: d.status || '', dirty: !!d.dirty,
@@ -101,6 +103,12 @@ Page({
       // 服务端已进入审核/定稿即锁定：即便本地有 dirty（不覆盖其内容），也把表单置只读。
       if (this.data.dirty) { this.setData({ offline: false, readonly: ro }); return; }
       const c = d.content || {};
+      // 服务端内容即三方合并的底版：整份存下（六键），供保存回问卷时和线上比对。
+      const base = {
+        basic: c.basic || {}, gps: c.gps || null, subjects: c.subjects || [],
+        subject_levels: c.subject_levels || {}, asset_conditions: c.asset_conditions || {},
+        photos: c.photos || [],
+      };
       const draft = {
         id: this.data.localId || sid, serverId: sid,
         filler: app.globalData.filler || '',
@@ -108,6 +116,7 @@ Page({
         geo: this.data.geo || {}, photos: c.photos || [],
         pendingPhotos: this.data.pendingPhotos || [],
         subjectLevels: c.subject_levels || {}, assetConditions: c.asset_conditions || {},
+        base: base,
         updatedAt: d.updated_at || '', status: d.status || '', dirty: false,
       };
       store.saveDraftLocal(draft);
@@ -115,6 +124,7 @@ Page({
         survey_id: sid, form: { category: draft.category, basic: draft.basic },
         gps: draft.gps, photos: draft.photos,
         subjectLevels: draft.subjectLevels, assetConditions: draft.assetConditions,
+        base: base,
         catIndex: Math.max(0, CATEGORIES.indexOf(draft.category)),
         fields: fieldsFor(draft.category || ''),
         serverStatus: draft.status, dirty: false, offline: false,
@@ -131,6 +141,7 @@ Page({
       gps: this.data.gps, geo: this.data.geo,
       photos: this.data.photos || [], pendingPhotos: this.data.pendingPhotos || [],
       subjectLevels: this.data.subjectLevels || {}, assetConditions: this.data.assetConditions || {},
+      base: this.data.base || null,   // 底版随草稿持久化（否则自动存盘会把它冲掉）
       updatedAt: new Date().toISOString(),
       status: this.data.serverStatus || '草稿',
       dirty: true, needsSync: this.data.needsSync, pendingSubmit: this.data.pendingSubmit,
@@ -208,12 +219,20 @@ Page({
     store.saveDraftLocal(this._draftObj({ dirty: true }));
     sync.syncOne(broker, store, this.data.localId).then((r) => {
       if (r.skipped) return;
+      if (r.conflict) { this._goResolveConflict(r); return; }
       this.rememberLegacy(r.survey_id);
       this.setData({ survey_id: r.survey_id, serverStatus: '草稿', dirty: false,
         needsSync: false, offline: false, photos: r.photos || this.data.photos,
-        msg: '已暂存：' + r.survey_id });
+        base: r.base || this.data.base, msg: '已暂存：' + r.survey_id });
     }).catch((e) => this.setData({ offline: true,
       msg: '未同步（已存本机，联网后自动补传）：' + ((e && e.detail) || '网络错误') }));
+  },
+
+  // 保存遇同字段冲突：把冲突暂存到全局，跳冲突页逐字段选（解决后回来带 resolutions 重发）。
+  _goResolveConflict(r) {
+    app.globalData.pendingConflict = { draftId: this.data.localId, conflicts: r.conflicts || [] };
+    this.setData({ dirty: true, needsSync: true, offline: false, msg: '问卷有冲突，请逐项选择保留哪个' });
+    dd.navigateTo({ url: '/pages/conflict/conflict?draftId=' + this.data.localId });
   },
 
   onSubmit() {
@@ -223,6 +242,7 @@ Page({
     store.saveDraftLocal(this._draftObj({ dirty: true }));
     sync.syncOne(broker, store, this.data.localId).then((r) => {
       if (r.skipped) return;
+      if (r.conflict) { this._goResolveConflict(r); return; }
       this.rememberLegacy(r.survey_id);
       this.setData({ survey_id: r.survey_id, serverStatus: '已提交', dirty: false,
         needsSync: false, pendingSubmit: false, offline: false, msg: '已提交，办公端可拉取。' });
