@@ -34,6 +34,14 @@ function mergeContentJS(base, mine, theirs) {
   return { merged, conflicts };
 }
 
+// owners 并集测试替身（对拍权威在 broker store._union_owners）。
+function unionOwnersJS(existing, incoming, filler) {
+  const out = [];
+  [existing || [], incoming || [], filler ? [filler] : []].forEach((lst) =>
+    lst.forEach((x) => { if (x && out.indexOf(x) < 0) out.push(x); }));
+  return out;
+}
+
 let PASS = 0, FAIL = 0;
 function ok(cond, msg) { if (cond) { PASS++; } else { FAIL++; console.log('  ✗ FAIL: ' + msg); } }
 function eq(a, b, msg) { ok(JSON.stringify(a) === JSON.stringify(b), msg + ` (got ${JSON.stringify(a)}, want ${JSON.stringify(b)})`); }
@@ -50,6 +58,11 @@ function makeServer() {
     }
     if (a === 'saveDraft') {
       const existed = p.survey_id ? state.drafts[p.survey_id] : null;
+      // owners 并集：传了 → 与线上并集（filler 恒在）；没传 → 保留线上现状（新记录兜底 [filler]）。
+      const prevOwners = existed ? (existed.owners || []) : [];
+      const owners = p.owners ? unionOwnersJS(prevOwners, p.owners, p.filler)
+        : (existed ? (prevOwners.length ? prevOwners : (p.filler ? [p.filler] : []))
+          : (p.filler ? [p.filler] : []));
       // 双向同步：带 base 且行已存在 → 走三方合并（同 broker）；否则整份写入。
       if (p.base && existed) {
         const r = mergeContentJS(p.base, clone(p.content), existed.content || {});
@@ -69,12 +82,13 @@ function makeServer() {
           return { status: 'conflict', conflicts: unresolved, theirs_mtime: existed.updated_at || '' };
         }
         state.drafts[p.survey_id] = { category: p.category, content: r.merged, filler: p.filler,
-          status: existed.status || '草稿', updated_at: p.updated_at };
+          status: existed.status || '草稿', updated_at: p.updated_at, owners: owners };
         return { survey_id: p.survey_id };
       }
       const sid = p.survey_id || ('srv-' + (++state.seq));
       state.drafts[sid] = { category: p.category, content: clone(p.content), filler: p.filler,
-        status: (state.drafts[sid] && state.drafts[sid].status) || '草稿', updated_at: p.updated_at };
+        status: (state.drafts[sid] && state.drafts[sid].status) || '草稿', updated_at: p.updated_at,
+        owners: owners };
       return { survey_id: sid };
     }
     if (a === 'listSurveys') {
@@ -88,7 +102,8 @@ function makeServer() {
     if (a === 'deleteDraft') { delete state.drafts[p.survey_id]; return { ok: true }; }
     if (a === 'loadDraft') {
       const d = state.drafts[p.survey_id] || {};
-      return { category: d.category || '', content: d.content || {}, status: d.status || '', updated_at: d.updated_at || '' };
+      return { category: d.category || '', content: d.content || {}, status: d.status || '',
+        updated_at: d.updated_at || '', owners: d.owners || [] };
     }
     if (a === 'prefillGeo') return {
       address: '杭州市西湖区某路', bus_stops: ['A站', 'B站'],
@@ -685,6 +700,58 @@ async function main() {
   await tick();
   eq(server.state.drafts['srv-R'].content.basic.a, 'server', 'L7 选线上确认 → 写入 server 值');
   ok(getApp().globalData.pendingConflict === null, 'L7 解决后清空 pendingConflict');
+
+  // ===== M. 选共有人（owners 并集 + 填报人恒在） =====
+  console.log('M. 选共有人');
+
+  // M1 新建即以填报人为首个共有人
+  resetEnv();
+  const pM = makePage(formCfg);
+  pM.onLoad({});
+  await tick();
+  eq(pM.data.owners, ['u1'], 'M1 新建：填报人恒为首个共有人');
+
+  // M2 _addOwners 去重 + filler 恒在 + 存名字
+  pM._addOwners([{ userid: 'a', name: '甲' }, { userid: 'u1', name: '我' }, { userid: 'a', name: '甲' }]);
+  await tick();
+  eq(pM.data.owners, ['u1', 'a'], 'M2 加共有人去重、filler 恒首');
+  eq(pM.data.ownerNames.a, '甲', 'M2 存下姓名供展示');
+
+  // M3 暂存把 owners 带上服务端；另一设备并发加人 → 并集累积
+  pM.setData({ 'form.category': '办公' });
+  pM.onSave();
+  await tick();
+  const sidM = pM.data.survey_id;
+  eq(server.state.drafts[sidM].owners, ['u1', 'a'], 'M3 owners 随保存上服务端');
+  await broker.request('saveDraft', { survey_id: sidM, filler: 'u1', category: '办公', updated_at: 't9',
+    content: { basic: {}, subjects: [], subject_levels: {}, asset_conditions: {}, photos: [], gps: null },
+    owners: ['b'] });
+  eq(server.state.drafts[sidM].owners, ['u1', 'a', 'b'], 'M3 并发加共有人并集累积（谁都不丢）');
+
+  // M4 从服务端载入即拿到共有人
+  resetEnv();
+  await broker.request('saveDraft', { survey_id: 'srv-M4', filler: 'u1', category: '办公', updated_at: 't1',
+    content: { basic: {}, subjects: [], subject_levels: {}, asset_conditions: {}, photos: [], gps: null },
+    owners: ['u1', 'x'] });
+  server.state.drafts['srv-M4'].status = '已提交';
+  await store.upsertIndexEntry({ id: 'srv-M4', serverId: 'srv-M4', category: '办公', status: '已提交', submitted: true });
+  const pM4 = makePage(formCfg);
+  pM4.onLoad({ draftId: 'srv-M4' });
+  await tick();
+  ok(pM4.data.owners.indexOf('x') >= 0 && pM4.data.owners.indexOf('u1') >= 0, 'M4 载入服务端共有人');
+
+  // M5 移除非填报人；填报人不可删
+  const pM5 = makePage(formCfg);
+  pM5.onLoad({});
+  await tick();
+  pM5._addOwners([{ userid: 'a', name: '甲' }]);
+  await tick();
+  pM5.onRemoveOwner({ currentTarget: { dataset: { uid: 'a' } } });
+  await tick();
+  eq(pM5.data.owners, ['u1'], 'M5 移除共有人 a');
+  pM5.onRemoveOwner({ currentTarget: { dataset: { uid: 'u1' } } });   // 尝试删填报人
+  await tick();
+  eq(pM5.data.owners, ['u1'], 'M5 填报人不可删');
 
   console.log(`\n结果：${PASS} 通过，${FAIL} 失败`);
   process.exit(FAIL ? 1 : 0);

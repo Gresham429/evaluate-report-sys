@@ -3,3 +3,8 @@
 .inp, .pick { flex: 1; border: 1rpx solid #ddd; border-radius: 6rpx; padding: 10rpx; }
 .unsynced { color: #d4700a; font-size: 26rpx; padding: 6rpx 0; }
 .synced { color: #1a7f37; font-size: 26rpx; padding: 6rpx 0; }
+
+/* 共有人区 */
+.owner-row { display: flex; align-items: center; justify-content: space-between; padding: 10rpx 0; }
+.owner-name { color: #333; }
+.owner-x { color: #c33; padding: 0 16rpx; }

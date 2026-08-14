@@ -36,6 +36,9 @@ Page({
     photos: [], pendingPhotos: [],       // 采集页拥有；表单只随草稿带上传/持久
     subjectLevels: {}, assetConditions: {},  // 逐因素页拥有：档次 / 描述
     base: null,             // 双向同步：上次同服务端一致的内容底版，保存时带上让 broker 三方合并
+    owners: [],             // 共有人 userid 列表（填报人恒在、不可删）；办公端按它判可见/编辑
+    ownerNames: {},         // userid → 姓名（仅展示；随草稿存，避免每次重查通讯录）
+    filler: '',             // 当前登录人 userid（=填报人；用于「不可删」判断）
     msg: '',
     serverStatus: '',       // 载入/存过后的服务端状态：草稿 / 已提交 / 待审核 / 已定稿
     readonly: false,        // 已进入审核流程（待审核/已定稿）→ 整份只读，不可再改
@@ -46,8 +49,61 @@ Page({
   },
 
   onLoad(q) {
-    if (q && q.draftId) this.resume(q.draftId);
-    else this.setData({ localId: store.newLocalId() });   // 新建即建本地 id
+    const me = app.globalData.filler || '';
+    this.setData({ filler: me });
+    if (q && q.draftId) { this.resume(q.draftId); return; }
+    // 新建：本地 id + 填报人恒为首个共有人
+    const names = {};
+    if (me) names[me] = app.globalData.fillerName || '我';
+    this.setData({ localId: store.newLocalId(), owners: me ? [me] : [], ownerNames: names });
+  },
+
+  // 填报人恒在共有人内且排首位（不可删）。
+  _ensureFiller(owners) {
+    const me = app.globalData.filler || '';
+    const out = me ? [me] : [];
+    (owners || []).forEach((u) => { if (u && out.indexOf(u) < 0) out.push(u); });
+    return out;
+  },
+
+  // 并入选中的共有人（去重、filler 恒在），存名字供展示，落盘。
+  _addOwners(picked) {
+    const owners = this.data.owners.slice();
+    const names = store.assign(this.data.ownerNames, {});
+    (picked || []).forEach((p) => {
+      const uid = p && (p.userid || p.userId || p.emplId || p.id);
+      if (!uid) return;
+      if (owners.indexOf(uid) < 0) owners.push(uid);
+      names[uid] = p.name || p.userName || uid;
+    });
+    this.setData({ owners: this._ensureFiller(owners), ownerNames: names });
+    this._autosave();
+  },
+
+  // 从钉钉通讯录选共有人。⚠️ 选人 API 名/回执形状待真机校准（不同基础库/端有差异）：
+  //  常见候选 dd.chooseInteriorContacts / dd.complexChoose / dd.chooseDepartmentMemberOfEnterprise。
+  //  真机联调时对准可用 API 与其 result 字段（userid/name），映射进 _addOwners 即可。
+  onPickOwners() {
+    if (this._lockedGuard()) return;
+    const self = this;
+    const api = dd.chooseInteriorContacts || dd.complexChoose || dd.chooseContact;
+    if (typeof api !== 'function') { this.setData({ msg: '当前环境不支持选人，请在钉钉内打开' }); return; }
+    api({
+      multiple: true, limitTips: '最多选 20 人', maxUsers: 20,
+      success(res) {
+        const list = (res && (res.contacts || res.users || res.result)) || [];
+        self._addOwners(list);
+      },
+      fail() { self.setData({ msg: '选人已取消或失败' }); },
+    });
+  },
+
+  onRemoveOwner(e) {
+    if (this._lockedGuard()) return;
+    const uid = e.currentTarget.dataset.uid;
+    if (!uid || uid === (app.globalData.filler || '')) return;   // 填报人不可删
+    this.setData({ owners: this.data.owners.filter((u) => u !== uid) });
+    this._autosave();
   },
 
   // 回到表单（含从采集页返回）：拉采集页写的照片/定位；顺带尝试离线补传。
@@ -74,6 +130,7 @@ Page({
           photos: d.photos || [], pendingPhotos: d.pendingPhotos || [],
           subjectLevels: d.subjectLevels || {}, assetConditions: d.assetConditions || {},
           base: d.base || null,
+          owners: this._ensureFiller(d.owners || []), ownerNames: d.ownerNames || {},
           catIndex: Math.max(0, CATEGORIES.indexOf(d.category)),
           fields: fieldsFor(d.category || ''),
           serverStatus: d.status || '', dirty: !!d.dirty,
@@ -109,6 +166,10 @@ Page({
         subject_levels: c.subject_levels || {}, asset_conditions: c.asset_conditions || {},
         photos: c.photos || [],
       };
+      // 服务端返回共有人（userid，无名字）→ 已知名字沿用、未知用 userid 兜底展示。
+      const owners = this._ensureFiller(d.owners || []);
+      const ownerNames = store.assign(this.data.ownerNames || {}, {});
+      owners.forEach((u) => { if (!ownerNames[u]) ownerNames[u] = u; });
       const draft = {
         id: this.data.localId || sid, serverId: sid,
         filler: app.globalData.filler || '',
@@ -116,7 +177,7 @@ Page({
         geo: this.data.geo || {}, photos: c.photos || [],
         pendingPhotos: this.data.pendingPhotos || [],
         subjectLevels: c.subject_levels || {}, assetConditions: c.asset_conditions || {},
-        base: base,
+        base: base, owners: owners, ownerNames: ownerNames,
         updatedAt: d.updated_at || '', status: d.status || '', dirty: false,
       };
       store.saveDraftLocal(draft);
@@ -124,7 +185,7 @@ Page({
         survey_id: sid, form: { category: draft.category, basic: draft.basic },
         gps: draft.gps, photos: draft.photos,
         subjectLevels: draft.subjectLevels, assetConditions: draft.assetConditions,
-        base: base,
+        base: base, owners: owners, ownerNames: ownerNames,
         catIndex: Math.max(0, CATEGORIES.indexOf(draft.category)),
         fields: fieldsFor(draft.category || ''),
         serverStatus: draft.status, dirty: false, offline: false,
@@ -142,6 +203,7 @@ Page({
       photos: this.data.photos || [], pendingPhotos: this.data.pendingPhotos || [],
       subjectLevels: this.data.subjectLevels || {}, assetConditions: this.data.assetConditions || {},
       base: this.data.base || null,   // 底版随草稿持久化（否则自动存盘会把它冲掉）
+      owners: this._ensureFiller(this.data.owners), ownerNames: this.data.ownerNames || {},
       updatedAt: new Date().toISOString(),
       status: this.data.serverStatus || '草稿',
       dirty: true, needsSync: this.data.needsSync, pendingSubmit: this.data.pendingSubmit,

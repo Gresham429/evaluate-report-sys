@@ -23,6 +23,7 @@ from serverless.survey_broker.record import (
     content_to_fields,
     fields_to_content,
     new_survey_id,
+    owners_from_fields,
 )
 
 __all__ = ["RecordWriter", "SurveyBrokerStore", "SurveyConflict"]
@@ -35,6 +36,16 @@ class SurveyConflict(Exception):
         super().__init__("问卷内容冲突，需逐字段解决")
         self.conflicts = conflicts
         self.theirs_mtime = theirs_mtime
+
+
+def _union_owners(existing: list[str], incoming: list[str], filler: str) -> list[str]:
+    """共有人并集（统一 spec §4）：线上已有 + 传入 + 填报人，去重保序、filler 恒在。"""
+    out: list[str] = []
+    for src in (existing or [], incoming or [], [filler] if filler else []):
+        for x in src:
+            if x and x not in out:
+                out.append(x)
+    return out
 
 
 def _resolve(
@@ -89,6 +100,14 @@ class SurveyBrokerStore:
                 return str(rec.get("id")), str(fields.get(COL_STATUS, ""))
         return None
 
+    def _existing_owners(self, survey_id: str) -> list[str]:
+        """线上该问卷的共有人（供并集）；找不到给 []。"""
+        for rec in self._client.list_records(self._sheet):
+            fields = rec.get("fields", {})
+            if str(fields.get(COL_ID, "")) == survey_id:
+                return owners_from_fields(fields)
+        return []
+
     def save_draft(
         self,
         *,
@@ -132,6 +151,16 @@ class SurveyBrokerStore:
                 raise SurveyConflict(unresolved, current["updated_at"])
             to_write = merged
 
+        # 共有人并集（统一 spec §4）：传了 owners → 与线上并集（filler 恒在）；没传（旧客户端）
+        # → 保留线上现状（别用 [filler] 覆盖、丢掉别人加的共有人）。
+        if owners is not None:
+            existing = self._existing_owners(sid) if found is not None else []
+            final_owners: list[str] | None = _union_owners(existing, owners, filler)
+        elif found is not None:
+            final_owners = self._existing_owners(sid) or None
+        else:
+            final_owners = None  # 新记录、没传 → content_to_fields 兜底 [filler]
+
         fields = content_to_fields(
             survey_id=sid,
             status=STATUS_DRAFT,
@@ -139,7 +168,7 @@ class SurveyBrokerStore:
             category=category,
             updated_at=updated_at,
             content=to_write,
-            owners=owners,
+            owners=final_owners,
         )
         if found is not None:
             self._client.update_record(self._sheet, found[0], fields)
@@ -164,6 +193,7 @@ class SurveyBrokerStore:
                     "category": str(fields.get(COL_CATEGORY, "")),
                     "updated_at": str(fields.get(COL_MTIME, "")),
                     "content": fields_to_content(fields),
+                    "owners": owners_from_fields(fields),  # 供小程序显示已有共有人 + 下次并集带上
                 }
         raise KeyError(f"未找到问卷：{survey_id}")
 

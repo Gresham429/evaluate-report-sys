@@ -19,6 +19,16 @@
   </view>
 </view>
 
+<view class="card">
+  <view class="label">共有人（可见 / 可编辑此问卷的人）</view>
+  <view class="owner-row" a:for="{{owners}}" a:for-item="uid" key="{{uid}}">
+    <text class="owner-name">{{ownerNames[uid] || uid}}{{uid === filler ? '（填报人）' : ''}}</text>
+    <text class="owner-x" a:if="{{!readonly && uid !== filler}}" data-uid="{{uid}}" onTap="onRemoveOwner">✕</text>
+  </view>
+  <button a:if="{{!readonly}}" onTap="onPickOwners">＋ 从通讯录选共有人</button>
+  <view class="muted">填报人恒在、不可删；任何共有人都能再加（提交后也可）。</view>
+</view>
+
 <view class="card" a:if="{{!readonly}}">
   <button class="btn-primary" onTap="onCapture">现场拍照</button>
   <view class="muted">照片 {{photos.length}} 已传{{pendingPhotos.length ? ('、' + pendingPhotos.length + ' 待传') : ''}}</view>

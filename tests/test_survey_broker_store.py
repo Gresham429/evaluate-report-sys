@@ -322,3 +322,48 @@ def test_save_draft_new_record_with_base_inserts_as_is() -> None:
                               updated_at="t1", content=_c({"a": "phone"}), base=_c({"a": "1"}))
     assert result == "newid"
     assert store.load("newid")["content"]["basic"] == {"a": "phone"}
+
+
+# ─────────────────────────────────── 选共有人（待办#2）：owners 并集
+
+def test_save_draft_unions_owners() -> None:
+    """任何共有人都能再加：再存的 owners 与线上并集，谁都不会被挤掉。"""
+    client = FakeClient()
+    store = SurveyBrokerStore(client, _SHEET)
+    store.save_draft(survey_id="q1", filler="u1", category="住宅", updated_at="t1",
+                     content=_content(), owners=["u1", "a"])
+    store.save_draft(survey_id="q1", filler="u1", category="住宅", updated_at="t2",
+                     content=_content(), owners=["u1", "b"])
+    row = client.list_records(_SHEET)[0]
+    assert json.loads(row["fields"][COL_OWNERS]) == ["u1", "a", "b"]
+
+
+def test_save_draft_owners_none_preserves_existing() -> None:
+    """旧客户端 saveDraft 不带 owners → 保留线上现状（不被 [filler] 覆盖、不丢共有人）。"""
+    client = FakeClient()
+    store = SurveyBrokerStore(client, _SHEET)
+    store.save_draft(survey_id="q1", filler="u1", category="住宅", updated_at="t1",
+                     content=_content(), owners=["u1", "a", "b"])
+    store.save_draft(survey_id="q1", filler="u1", category="住宅", updated_at="t2",
+                     content=_content())  # owners=None
+    row = client.list_records(_SHEET)[0]
+    assert json.loads(row["fields"][COL_OWNERS]) == ["u1", "a", "b"]
+
+
+def test_save_draft_filler_always_in_owners() -> None:
+    """填报人恒在共有人内——即便传入 owners 漏了 filler。"""
+    client = FakeClient()
+    store = SurveyBrokerStore(client, _SHEET)
+    store.save_draft(survey_id="q1", filler="u1", category="住宅", updated_at="t1",
+                     content=_content(), owners=["a"])   # 漏了 filler
+    owners = json.loads(client.list_records(_SHEET)[0]["fields"][COL_OWNERS])
+    assert "u1" in owners and "a" in owners
+
+
+def test_load_returns_owners() -> None:
+    """load 回传 owners，供小程序显示已有共有人并在下次并集带上。"""
+    client = FakeClient()
+    store = SurveyBrokerStore(client, _SHEET)
+    store.save_draft(survey_id="q1", filler="u1", category="住宅", updated_at="t1",
+                     content=_content(), owners=["u1", "a"])
+    assert store.load("q1")["owners"] == ["u1", "a"]

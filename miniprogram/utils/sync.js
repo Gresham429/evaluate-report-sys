@@ -25,6 +25,8 @@ function _payload(draft, resolutions) {
   // 无底版（首个草稿/旧客户端）时不带 → broker 整份写入（向后兼容）。
   if (draft.base) p.base = draft.base;
   if (resolutions) p.resolutions = resolutions;
+  // 选共有人：带上共有人 userid，broker 与线上并集（谁都不会被挤掉）。无则不带→broker 保留线上。
+  if (draft.owners && draft.owners.length) p.owners = draft.owners;
   return p;
 }
 
