@@ -188,3 +188,57 @@ def test_待同步_defaults_false_for_old_draft_without_field() -> None:
     payload = {"id": "abc123", "报告编号": "", "类别": "办公",
                "更新时间": "2026-07-18T10:00:00", "数据": {}}
     assert DraftStore.from_dict(payload).待同步 is False
+
+
+# ─────────────────────────────────── 问卷ID 与拉取判重（待办#1）
+
+def test_问卷ID_round_trips_through_store() -> None:
+    """草稿记住来源问卷ID，供拉取判重（同一问卷回同一份草稿）。"""
+    d = Draft.new({"报告编号": "", "类别": "办公"}, 问卷ID="S-42")
+    assert d.问卷ID == "S-42"
+    assert d.info().问卷ID == "S-42"
+    back = DraftStore.from_dict(DraftStore.to_dict(d))
+    assert back.问卷ID == "S-42"
+
+
+def test_问卷ID_defaults_empty_for_old_draft_without_field() -> None:
+    # 老草稿文件没有「问卷ID」键：缺省视为空串（手建草稿，不参与判重）。
+    payload = {"id": "abc123", "报告编号": "", "类别": "办公",
+               "更新时间": "2026-07-18T10:00:00", "数据": {}}
+    assert DraftStore.from_dict(payload).问卷ID == ""
+    assert Draft.new({}).问卷ID == ""  # 未指定来源=空串
+
+
+def test_find_by_survey_returns_matching_draft(tmp_path: Path) -> None:
+    """按问卷ID找到那份草稿——拉取判重的核心查询。"""
+    store = DraftStore(tmp_path)
+    draft_id = store.save(Draft.new(_表单数据(), 问卷ID="S-1", now=_基准时刻))
+    store.save(Draft.new(_表单数据("别的"), 问卷ID="S-2", now=_基准时刻))
+
+    got = store.find_by_survey("S-1")
+    assert got is not None
+    assert got.id == draft_id
+
+
+def test_find_by_survey_empty_query_returns_none(tmp_path: Path) -> None:
+    """空问卷ID一律不匹配——绝不把手建草稿（问卷ID=''）误并到一起。"""
+    store = DraftStore(tmp_path)
+    store.save(Draft.new(_表单数据(), now=_基准时刻))  # 手建，问卷ID=""
+    assert store.find_by_survey("") is None
+
+
+def test_find_by_survey_no_match_returns_none(tmp_path: Path) -> None:
+    store = DraftStore(tmp_path)
+    store.save(Draft.new(_表单数据(), 问卷ID="S-1", now=_基准时刻))
+    assert store.find_by_survey("S-9") is None
+
+
+def test_find_by_survey_returns_newest_when_multiple(tmp_path: Path) -> None:
+    """修复前遗留的同问卷多份重复草稿：回最新那份（list_all 已按新→旧）。"""
+    store = DraftStore(tmp_path)
+    store.save(Draft.new(_表单数据("旧"), 问卷ID="S-1", now=datetime(2026, 7, 16, 1, 0)))
+    新 = store.save(Draft.new(_表单数据("新"), 问卷ID="S-1", now=datetime(2026, 7, 16, 9, 0)))
+
+    got = store.find_by_survey("S-1")
+    assert got is not None
+    assert got.id == 新

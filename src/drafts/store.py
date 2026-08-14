@@ -88,6 +88,23 @@ class DraftStore:
         infos.sort(key=lambda i: (i.更新时间, i.id), reverse=True)
         return tuple(infos)
 
+    def find_by_survey(self, 问卷ID: str) -> DraftInfo | None:
+        """找出来源问卷ID为 `问卷ID` 的草稿摘要；找不到（或问卷ID为空）返回 None。
+
+        供办公端「从实勘问卷拉取」判重：同一问卷已建过草稿时续填那份、不新建，
+        免得「拉 N 次 = N 份失联草稿」。
+
+        `问卷ID` 为空一律不匹配——手建草稿（新建/导入 Excel）的问卷ID恒为空，
+        绝不能因此被并到一起。修复前遗留的同问卷多份重复草稿，返回**最新**那份
+        （`list_all` 已按更新时间新→旧排），其余留待用户手动清理。
+        """
+        if not 问卷ID:
+            return None
+        for info in self.list_all():
+            if info.问卷ID == 问卷ID:
+                return info
+        return None
+
     def get(self, draft_id: str) -> Draft | None:
         """按 id 取一份完整草稿。
 
@@ -161,6 +178,7 @@ class DraftStore:
             "类别": draft.类别,
             "更新时间": draft.更新时间.isoformat(),
             "待同步": draft.待同步,
+            "问卷ID": draft.问卷ID,
             "数据": draft.数据,
         }
 
@@ -181,4 +199,5 @@ class DraftStore:
             更新时间=datetime.fromisoformat(str(data["更新时间"])),
             数据=dict(data.get("数据", {})),  # type: ignore[call-overload]
             待同步=bool(data.get("待同步", False)),
+            问卷ID=str(data.get("问卷ID", "")),  # 缺键=旧草稿，兜底空串（不参与判重）
         )

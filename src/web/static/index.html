@@ -581,6 +581,9 @@ let baseTable = null;        // 当前基础表版本信息
 let attachmentFiles = [];    // 附件不进草稿：File 对象存不进 JSON
 let priceUnit = '', areaUnit = '';
 let draftId = null;
+// 当前表单的来源问卷ID：从实勘问卷拉取时设为该问卷ID，随 saveDraft 存进草稿供再拉判重；
+// 手建（新建/导入 Excel）恒为空。三条 openForm 路径各自维护它。见 plan 2026-08-14-拉取草稿去重。
+let currentSurveyId = '';
 let draftsCollapsed = false; // 顶部草稿列表是否收起（存住，免得每次重渲染又展开）
 let priceOrigin = 'empty';   // 一览表单价从哪来：empty/excel/computed/manual
 
@@ -750,6 +753,7 @@ async function saveDraft() {
   if (!currentProject) return;
   const body = {
     id: draftId,
+    问卷ID: currentSurveyId,  // 拉取来源问卷ID，供再拉判重；手建为空
     数据: {
       报告编号: currentProject.report_no,
       类别: currentProject.category,
@@ -816,6 +820,7 @@ $('draftList').addEventListener('click', async (event) => {
   } else if (t.dataset.draft) {
     const body = await (await fetch('/api/drafts/' + encodeURIComponent(t.dataset.draft))).json();
     draftId = body.id;
+    currentSurveyId = body.问卷ID || '';  // 续填保住来源问卷链接，再拉仍判重到这份
     currentProject = body.数据.project;
     subjectLevels = body.数据.subject_levels || {};
     priceOrigin = body.数据.priceOrigin || 'empty';
@@ -918,6 +923,7 @@ $('newBtn').addEventListener('click', async () => {
   subjectLevels = {};
   priceOrigin = 'empty';
   lastCompute = null;
+  currentSurveyId = '';  // 手建草稿无来源问卷，不参与拉取判重
   try {
     await openForm(category);
     $('xlsx-status').textContent = '';
@@ -956,6 +962,7 @@ $('xlsx').addEventListener('change', async (event) => {
   }
   const body = await response.json();
   applyPrefillBody(body, 'excel');
+  currentSurveyId = '';  // Excel 导入是手工便利，非问卷来源
   $('xlsx-status').textContent = file.name;
   $('xlsx-status').className = 'status done';
   try {
@@ -1022,9 +1029,33 @@ $('surveyPicker').addEventListener('click', async (event) => {
     return;
   }
   const body = await r.json();
+  $('surveyPicker').hidden = true;
+
+  if (body.existing_draft_id) {
+    // 这份问卷已建过草稿：续填那份、不新建，免得「拉 N 次 = N 份失联草稿」。
+    // 用已存草稿的内容（保住此前已填的），不拿刚拉的空预填覆盖——与「续填」按钮同路。
+    const d = await (await fetch('/api/drafts/' + encodeURIComponent(body.existing_draft_id))).json();
+    draftId = d.id;
+    currentSurveyId = d.问卷ID || (body.questionnaire_id || '');
+    currentProject = d.数据.project;
+    subjectLevels = d.数据.subject_levels || {};
+    priceOrigin = d.数据.priceOrigin || 'empty';
+    lastCompute = null;  // 换项目须清重算快照，同「续填」（见 openForm 处注释）
+    $('xlsx-status').textContent = '实勘问卷 ' + (body.questionnaire_id || '') + '（已有草稿，已为你续上）';
+    $('xlsx-status').className = 'status done';
+    try {
+      await openForm(currentProject.category, { keepDraft: true });
+    } catch (err) {
+      $('sourceError').textContent = err.message;
+      $('sourceError').hidden = false;
+    }
+    return;
+  }
+
+  // 首次拉这份问卷：预填新建，并记下来源问卷ID，存草稿时打标供再拉判重。
   // 问卷无比较法价（单价/离散度留 0），价由后续「选实例」重算——故 origin='empty'。
   applyPrefillBody(body, 'empty');
-  $('surveyPicker').hidden = true;
+  currentSurveyId = body.questionnaire_id || '';
   $('xlsx-status').textContent = '实勘问卷 ' + (body.questionnaire_id || '');
   $('xlsx-status').className = 'status done';
   try {
@@ -1694,6 +1725,7 @@ async function saveSyncDraft() {
   const body = {
     id: draftId,
     待同步: true,
+    问卷ID: currentSurveyId,  // 拉取来的草稿离线出报告，仍保住来源问卷链接
     数据: {
       报告编号: currentProject.report_no,
       类别: currentProject.category,

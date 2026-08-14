@@ -55,6 +55,9 @@ class DraftInfo:
     类别: str
     更新时间: datetime
     待同步: bool = False  # 离线点「出报告」落下的待同步草稿标记；普通草稿为 False
+    # 来源问卷ID：拉取「已提交」问卷预填时打上，供再拉判重（同一问卷回同一份草稿）。
+    # 空串=手建草稿（新建/导入 Excel），天然不参与判重。见 plan 2026-08-14-拉取草稿去重。
+    问卷ID: str = ""
 
 
 @dataclass(frozen=True)
@@ -70,6 +73,7 @@ class Draft:
     更新时间: datetime
     数据: dict[str, object]
     待同步: bool = False  # 离线出报告存下的待定稿草稿；联网后在对账界面同步或删
+    问卷ID: str = ""  # 来源问卷ID（同 DraftInfo）；空=手建，不参与拉取判重
 
     @staticmethod
     def new(
@@ -77,6 +81,7 @@ class Draft:
         draft_id: str | None = None,
         now: datetime | None = None,
         待同步: bool = False,
+        问卷ID: str = "",
     ) -> "Draft":
         """由表单数据造一份草稿记录。
 
@@ -86,6 +91,7 @@ class Draft:
             now: 更新时间；缺省取当前时刻。显式开这个口子是为了让测试固定时间，
                 模块内不直接调 `datetime.now()`。
             待同步: 是否为离线待同步草稿；缺省为 False。
+            问卷ID: 拉取问卷预填时的来源问卷ID；手建（新建/导入）留空。缺省为空串。
 
         Returns:
             草稿记录。`报告编号`/`类别` 已从 `数据` 抽出平铺，抽不到则为空串。
@@ -97,11 +103,12 @@ class Draft:
             更新时间=now or datetime.now(),
             数据=数据,
             待同步=待同步,
+            问卷ID=问卷ID,
         )
 
     def info(self) -> DraftInfo:
         """取摘要（丢掉 `数据`）。"""
         return DraftInfo(
             id=self.id, 报告编号=self.报告编号, 类别=self.类别,
-            更新时间=self.更新时间, 待同步=self.待同步,
+            更新时间=self.更新时间, 待同步=self.待同步, 问卷ID=self.问卷ID,
         )

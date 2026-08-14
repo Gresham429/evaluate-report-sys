@@ -131,6 +131,30 @@ def test_pull_unknown_id_404(
     assert client.get("/api/survey/pull", params={"id": "nope"}).status_code == 404
 
 
+def test_pull_reports_no_existing_draft_when_none(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """还没为这份问卷建过草稿时：existing_draft_id 为空，前端照旧走新建预填。"""
+    _wire(monkeypatch, _rows(_resp("42", STATUS_SUBMITTED)))
+    body = client.get("/api/survey/pull", params={"id": "42"}).json()
+    assert body["existing_draft_id"] is None
+    assert body["questionnaire_id"] == "42"  # 供前端给新草稿打标
+
+
+def test_pull_reports_existing_draft_for_same_survey(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """拉过一次后草稿带上问卷ID：再拉同一问卷 → existing_draft_id 命中那份（幂等，不新增）。"""
+    _wire(monkeypatch, _rows(_resp("42", STATUS_SUBMITTED)))
+    saved = client.post(
+        "/api/drafts",
+        json={"数据": {"报告编号": "R-42", "类别": "办公"}, "问卷ID": "42"},
+    ).json()["id"]
+
+    body = client.get("/api/survey/pull", params={"id": "42"}).json()
+    assert body["existing_draft_id"] == saved
+
+
 def test_local_mode_blocks_with_409(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

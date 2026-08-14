@@ -849,8 +849,12 @@ def create_app() -> FastAPI:
         if draft_id is not None and not isinstance(draft_id, str):
             raise HTTPException(status_code=400, detail="id 须为字符串")
         待同步 = bool(payload.get("待同步", False))
+        # 拉取问卷预填时前端带上来源问卷ID，给这份草稿打标供再拉判重；手建草稿留空。
+        问卷ID = str(payload.get("问卷ID", "") or "")
         try:
-            saved = DraftStore(_draft_dir()).save(Draft.new(raw, draft_id=draft_id, 待同步=待同步))
+            saved = DraftStore(_draft_dir()).save(
+                Draft.new(raw, draft_id=draft_id, 待同步=待同步, 问卷ID=问卷ID)
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"id": saved}
@@ -999,6 +1003,10 @@ def create_app() -> FastAPI:
 
         估价师据此免二次录入；比较法输出留空，仍由其选实例后重算（铁律 #7）。
         非本人问卷按「不存在」处理（404，不泄露他人问卷是否存在）。
+
+        判重：若已为这份问卷建过草稿，payload 带上 `existing_draft_id`（那份草稿 id），
+        前端据此续填那份、不再新建，免得「拉 N 次 = N 份失联草稿」。本端点仍只**读**，
+        不建草稿；建草稿照旧走 `POST /api/drafts`（带 `问卷ID` 打标）。
         """
         backend = _survey_backend()
         try:
@@ -1007,7 +1015,10 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return survey_to_prefill(response)
+        payload = survey_to_prefill(response)
+        existing = DraftStore(_draft_dir()).find_by_survey(response.问卷ID)
+        payload["existing_draft_id"] = existing.id if existing else None
+        return payload
 
     @app.post("/api/survey/review")
     def survey_review(payload: dict[str, Any]) -> dict[str, object]:
