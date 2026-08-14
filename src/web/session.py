@@ -15,7 +15,7 @@
 
 import logging
 
-from src.dingtalk import config
+from src.dingtalk import config, org
 from src.questionnaire.permissions import Viewer
 
 logger = logging.getLogger(__name__)
@@ -94,10 +94,9 @@ def viewer() -> Viewer:
     """当前请求的判定上下文（喂给 `SurveyPullBackend` 逐份判 can_see/can_edit/can_finalize）。
 
     operator=当前登录人 userid（会话或 .env 过渡，"" 表认不出→fail-closed）；is_admin=在
-    OFFICE_ADMINS 名单；**subordinates=下属集（P1 恒空，P2 由 org 模块按钉钉部门树填）**。
+    OFFICE_ADMINS 名单；subordinates=下属集——`config.use_org()` 开启时由 `org` 按钉钉部门树填
+    （fail-closed：未配/未校准/出错→空），默认关时恒空（P1：只有管理员能定稿/看全部）。
     """
-    return Viewer(
-        operator=current_operator(),
-        is_admin=is_admin(),
-        subordinates=frozenset(),  # P1：组织架构未接，无上级/下属
-    )
+    op = current_operator()
+    subs = org.subordinates(op) if config.use_org() else frozenset()
+    return Viewer(operator=op, is_admin=is_admin(), subordinates=subs)

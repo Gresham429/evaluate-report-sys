@@ -12,6 +12,7 @@ from src.dingtalk.oauth import DingtalkOAuth
 
 __all__ = [
     "use_notable",
+    "use_org",
     "build_client",
     "build_oauth",
     "login_redirect_uri",
@@ -30,6 +31,16 @@ _SWITCH_ON = "多维表"
 def use_notable() -> bool:
     """总开关：环境变量 `承载后端=多维表` 才把存储切到多维表。"""
     return os.environ.get(_SWITCH, "").strip() == _SWITCH_ON
+
+
+def use_org() -> bool:
+    """是否启用「组织架构上级」（`org.py` 接钉钉部门树填下属集）。**默认关**。
+
+    三个 topapi 端点须真机校准（见 org.py），校准通前保持 P1——`viewer()` 的下属集恒空、
+    只有管理员能定稿/看全部。校准通后设 env `组织架构上级=on` 开启，「owner 的上级可见/可定稿」
+    才生效。默认关也让不接组织架构的部署（及全部单测）零受影响。
+    """
+    return os.environ.get("组织架构上级", "").strip() == "on"
 
 
 def build_client(*, timeout: float = 30.0) -> NotableClient | None:

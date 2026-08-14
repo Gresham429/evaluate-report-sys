@@ -126,7 +126,7 @@ app 启动 load `.env`；`GET /api/online` 三态（本地／多维表在线／�
    `merge_content`（两侧镜像+契约对拍）、`/api/survey/writeback`、办公端「保存回问卷」+冲突弹窗（Playwright 冒烟通过）。
    **Phase 2✅代码全就绪**（2026-08-14）：broker `save_draft` 合并+`SurveyConflict`；小程序 `sync.js` 带 base+冲突处理+`resolveConflict`、`form.js` 捕获 base、新增 `pages/conflict/`（harness 121 通过）。**仍待：broker 重部署（若尚未）+ 小程序重传 + 真机联调**。
    见 [plan](superpowers/plans/2026-08-14-双向同步.md) + [sync spec](superpowers/specs/2026-08-12-问卷报告双向同步-design.md)。
-4. **组织架构上级**（`org.py` 接钉钉部门树，填 `Viewer.subordinates`；P1 恒空）→ 钉钉 org API 待校准。统一 spec §8。
+4. ~~**组织架构上级**~~ ✅ **已做**（2026-08-14，本地未 push）：`src/dingtalk/org.py`（下属集纯算法 + 三端点封装 + TTL 缓存 + **fail-closed**）接进 `session.viewer()`，`config.use_org()` 开关**默认关**（= P1，行为不变）。真机校准三个 topapi 端点后设 `组织架构上级=on` 启用「上级可见/可定稿」。[plan](superpowers/plans/2026-08-14-组织架构上级.md)
 5. **实勘编号 自动领号**：⛔ **留空待甲方定机制**。[留空 spec](superpowers/specs/2026-08-14-实勘编号自动领号-留空待甲方.md)
 6. **交付前**：broker 重部署（含 store.py 锁定 + listSurveys + owners）+ 小程序重传 + 真机点审核全流程/登录/只看自己 + `/code-review ultra`。
 
