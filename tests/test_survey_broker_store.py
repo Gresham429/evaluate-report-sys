@@ -227,3 +227,98 @@ def test_submit_refused_when_locked(locked: str) -> None:
     with pytest.raises(ValueError, match=locked):
         store.submit(sid)
     assert store.load(sid)["status"] == locked
+
+
+# ─────────────────────────────────── 双向同步 Phase 2：手机端 save_draft 走合并
+
+def _set_content(client: FakeClient, sid: str, content: dict[str, Any], mtime: str) -> None:
+    """模拟另一设备/办公端改了线上内容 + 更新时间（直接改底层行）。"""
+    from serverless.survey_broker.record import COL_CONTENT, COL_MTIME
+    for rec in client.list_records(_SHEET):
+        if rec["fields"][COL_ID] == sid:
+            client.update_record(
+                _SHEET, rec["id"],
+                {COL_CONTENT: json.dumps(content, ensure_ascii=False), COL_MTIME: mtime},
+            )
+            return
+    raise AssertionError(f"no such survey {sid}")
+
+
+def _c(basic: dict[str, str]) -> dict[str, Any]:
+    return {"basic": dict(basic), "subjects": [], "subject_levels": {},
+            "asset_conditions": {}, "photos": [], "gps": None}
+
+
+def test_save_draft_merges_different_fields_no_conflict() -> None:
+    """带 base 且记录已存在：手机改 a、线上改 b → 自动合并、两处都保住。"""
+    client = FakeClient()
+    store = SurveyBrokerStore(client, _SHEET)
+    base = _c({"a": "1", "b": "1"})
+    sid = store.save_draft(survey_id="q1", filler="u1", category="住宅",
+                           updated_at="t1", content=base)
+    _set_content(client, sid, _c({"a": "1", "b": "server"}), "t2")  # 线上改 b
+
+    result = store.save_draft(survey_id="q1", filler="u1", category="住宅",
+                              updated_at="t3", content=_c({"a": "phone", "b": "1"}), base=base)
+    assert result == sid
+    loaded = store.load(sid)
+    assert loaded["content"]["basic"]["a"] == "phone"   # 手机改的保住
+    assert loaded["content"]["basic"]["b"] == "server"  # 线上改的保住
+
+
+def test_save_draft_conflict_raises_and_not_written() -> None:
+    """同字段双改 → 抛 SurveyConflict、不写库。"""
+    from serverless.survey_broker.store import SurveyConflict
+
+    client = FakeClient()
+    store = SurveyBrokerStore(client, _SHEET)
+    base = _c({"a": "1"})
+    sid = store.save_draft(survey_id="q1", filler="u1", category="住宅",
+                           updated_at="t1", content=base)
+    _set_content(client, sid, _c({"a": "server"}), "t2")
+
+    with pytest.raises(SurveyConflict) as ei:
+        store.save_draft(survey_id="q1", filler="u1", category="住宅",
+                         updated_at="t3", content=_c({"a": "phone"}), base=base)
+    assert ei.value.conflicts[0]["field"] == "basic.a"
+    assert store.load(sid)["content"]["basic"]["a"] == "server"  # 未写
+
+
+def test_save_draft_resolutions_resolve_and_write() -> None:
+    from serverless.survey_broker.store import SurveyConflict  # noqa: F401
+
+    client = FakeClient()
+    store = SurveyBrokerStore(client, _SHEET)
+    base = _c({"a": "1"})
+    sid = store.save_draft(survey_id="q1", filler="u1", category="住宅",
+                           updated_at="t1", content=base)
+    _set_content(client, sid, _c({"a": "server"}), "t2")
+
+    result = store.save_draft(survey_id="q1", filler="u1", category="住宅", updated_at="t3",
+                              content=_c({"a": "phone"}), base=base,
+                              resolutions={"basic.a": "final"})
+    assert result == sid
+    assert store.load(sid)["content"]["basic"]["a"] == "final"
+
+
+def test_save_draft_base_none_is_plain_overwrite() -> None:
+    """base=None（旧客户端/新草稿）→ 不合并、整份覆盖（向后兼容）。"""
+    client = FakeClient()
+    store = SurveyBrokerStore(client, _SHEET)
+    sid = store.save_draft(survey_id="q1", filler="u1", category="住宅",
+                           updated_at="t1", content=_c({"a": "1", "b": "1"}))
+    _set_content(client, sid, _c({"a": "1", "b": "server"}), "t2")
+    store.save_draft(survey_id="q1", filler="u1", category="住宅",
+                     updated_at="t3", content=_c({"a": "phone", "b": "1"}))  # 无 base
+    loaded = store.load(sid)
+    assert loaded["content"]["basic"] == {"a": "phone", "b": "1"}  # 整份覆盖，线上 b 被盖
+
+
+def test_save_draft_new_record_with_base_inserts_as_is() -> None:
+    """给了 base 但记录还不存在（首个草稿）→ 照旧 insert，不合并。"""
+    client = FakeClient()
+    store = SurveyBrokerStore(client, _SHEET)
+    result = store.save_draft(survey_id="newid", filler="u1", category="住宅",
+                              updated_at="t1", content=_c({"a": "phone"}), base=_c({"a": "1"}))
+    assert result == "newid"
+    assert store.load("newid")["content"]["basic"] == {"a": "phone"}

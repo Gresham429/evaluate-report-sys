@@ -16,7 +16,7 @@ from typing import Any, Protocol
 from serverless.survey_broker.amap import AmapClient
 from serverless.survey_broker.identity import DingtalkIdentity
 from serverless.survey_broker.media import DingtalkMedia
-from serverless.survey_broker.store import SurveyBrokerStore
+from serverless.survey_broker.store import SurveyBrokerStore, SurveyConflict
 from src.dingtalk.notable import NotableClient
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,8 @@ class _Store(Protocol):
         updated_at: str,
         content: dict[str, Any],
         owners: list[str] | None = None,
+        base: dict[str, Any] | None = None,
+        resolutions: dict[str, Any] | None = None,
     ) -> str: ...
 
     def load(self, survey_id: str) -> dict[str, Any]: ...
@@ -115,6 +117,9 @@ def dispatch(
                 raise ValueError("content 必须是对象")
             raw_owners = payload.get("owners")
             owners = [str(x) for x in raw_owners if str(x)] if isinstance(raw_owners, list) else None
+            # 双向同步：手机端带 base（载入底版）+ 可选 resolutions（冲突解决后重发）。
+            base = payload.get("base") if isinstance(payload.get("base"), dict) else None
+            resolutions = payload.get("resolutions") if isinstance(payload.get("resolutions"), dict) else None
             survey_id = store.save_draft(
                 survey_id=payload.get("survey_id"),
                 filler=str(_require(payload, "filler")),
@@ -122,6 +127,8 @@ def dispatch(
                 updated_at=str(_require(payload, "updated_at")),
                 content=content,
                 owners=owners,
+                base=base,
+                resolutions=resolutions,
             )
             return 200, {"survey_id": survey_id}
         if action == "loadDraft":
@@ -143,6 +150,9 @@ def dispatch(
             lat = float(_require(payload, "lat"))
             return 200, amap.prefill_geo(lng, lat)
         return 400, {"error": f"未知 action：{action}"}
+    except SurveyConflict as exc:
+        # 同字段双改：不写库，回冲突让小程序逐字段选后带 resolutions 重发（HTTP 200，靠 status 区分）。
+        return 200, {"status": "conflict", "conflicts": exc.conflicts, "theirs_mtime": exc.theirs_mtime}
     except KeyError as exc:
         return 404, {"error": f"未找到：{exc}"}
     except ValueError as exc:

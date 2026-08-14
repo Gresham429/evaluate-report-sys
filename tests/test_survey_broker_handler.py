@@ -20,8 +20,12 @@ class FakeStore:
         updated_at: str,
         content: dict[str, Any],
         owners: list[str] | None = None,
+        base: dict[str, Any] | None = None,
+        resolutions: dict[str, Any] | None = None,
     ) -> str:
         sid = survey_id or "generated-id"
+        self.last_base = base            # 供测试断言 handler 确实透传了 base
+        self.last_resolutions = resolutions
         self.rows[sid] = {
             "survey_id": sid,
             "status": "草稿",
@@ -115,6 +119,39 @@ def test_dispatch_save_draft_with_given_survey_id() -> None:
     )
     assert status == 200
     assert body == {"survey_id": "q-fixed"}
+
+
+def test_dispatch_save_draft_forwards_base_and_resolutions() -> None:
+    """双向同步：handler 把 base + resolutions 透传给 store。"""
+    store = FakeStore()
+    dispatch(
+        "saveDraft",
+        {"filler": "张三", "category": "住宅", "updated_at": "t1", "content": {},
+         "base": {"basic": {"a": "1"}}, "resolutions": {"basic.a": "x"}},
+        store=store, amap=FakeAmap(), identity=FakeIdentity(),
+    )
+    assert store.last_base == {"basic": {"a": "1"}}
+    assert store.last_resolutions == {"basic.a": "x"}
+
+
+def test_dispatch_save_draft_conflict_maps_to_conflict_body() -> None:
+    """store 抛 SurveyConflict → handler 回 200 + status=conflict + conflicts。"""
+    from serverless.survey_broker.store import SurveyConflict
+
+    class ConflictStore(FakeStore):
+        def save_draft(self, **kw: Any) -> str:
+            raise SurveyConflict([{"field": "basic.a", "base": "0", "mine": "1", "theirs": "2"}], "t2")
+
+    status, body = dispatch(
+        "saveDraft",
+        {"filler": "张三", "category": "住宅", "updated_at": "t1", "content": {},
+         "base": {"basic": {"a": "1"}}},
+        store=ConflictStore(), amap=FakeAmap(), identity=FakeIdentity(),
+    )
+    assert status == 200
+    assert body["status"] == "conflict"
+    assert body["conflicts"][0]["field"] == "basic.a"
+    assert body["theirs_mtime"] == "t2"
 
 
 def test_dispatch_load_draft_happy_path() -> None:

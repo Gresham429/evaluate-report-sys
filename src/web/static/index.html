@@ -437,8 +437,24 @@
           <button id="generate-agreement">下载委托评估协议书</button>
           <span class="status" id="generate-status"></span>
         </div>
+        <div class="actions">
+          <button id="writeback" type="button" hidden>保存回问卷</button>
+          <span class="status" id="writeback-status"></span>
+        </div>
       </div>
     </section>
+
+    <!-- 双向同步：同字段冲突时逐字段选保留哪个 -->
+    <dialog id="conflictDialog">
+      <form method="dialog">
+        <h3 style="margin:.2rem 0 .6rem">问卷有冲突，请逐项选择保留哪个</h3>
+        <div id="conflictList"></div>
+        <menu class="actions" style="margin:.8rem 0 0;padding:0">
+          <button value="cancel">取消</button>
+          <button value="ok" class="primary">用所选保存</button>
+        </menu>
+      </form>
+    </dialog>
   </main>
 
   <!-- ═══════════════ 实例库 ═══════════════ -->
@@ -584,6 +600,10 @@ let draftId = null;
 // 当前表单的来源问卷ID：从实勘问卷拉取时设为该问卷ID，随 saveDraft 存进草稿供再拉判重；
 // 手建（新建/导入 Excel）恒为空。三条 openForm 路径各自维护它。见 plan 2026-08-14-拉取草稿去重。
 let currentSurveyId = '';
+// 双向同步：拉取时的问卷内容底版 + 底版时间，作「保存回问卷」3-way 合并的 base。
+// 随草稿 数据 持久化；手建为 null（不显示「保存回问卷」）。见 plan 2026-08-14-双向同步。
+let currentSurveyBase = null;
+let currentSurveyBaseMtime = '';
 let draftsCollapsed = false; // 顶部草稿列表是否收起（存住，免得每次重渲染又展开）
 let priceOrigin = 'empty';   // 一览表单价从哪来：empty/excel/computed/manual
 
@@ -760,6 +780,8 @@ async function saveDraft() {
       project: currentProject,
       subject_levels: subjectLevels,
       priceOrigin,
+      survey_base: currentSurveyBase,        // 回写合并底版（双向同步）
+      survey_base_mtime: currentSurveyBaseMtime,
     },
   };
   try {
@@ -821,6 +843,8 @@ $('draftList').addEventListener('click', async (event) => {
     const body = await (await fetch('/api/drafts/' + encodeURIComponent(t.dataset.draft))).json();
     draftId = body.id;
     currentSurveyId = body.问卷ID || '';  // 续填保住来源问卷链接，再拉仍判重到这份
+    currentSurveyBase = body.数据.survey_base || null;  // 恢复回写合并底版
+    currentSurveyBaseMtime = body.数据.survey_base_mtime || '';
     currentProject = body.数据.project;
     subjectLevels = body.数据.subject_levels || {};
     priceOrigin = body.数据.priceOrigin || 'empty';
@@ -908,6 +932,9 @@ async function openForm(category, { keepDraft = false } = {}) {
   renderFactors();
   await loadInstances(category);
   markStep('step-basic');
+  // 「保存回问卷」只在有来源问卷 + 底版时可用（拉取来的报告草稿才谈得上回写）。
+  $('writeback').hidden = !(currentSurveyId && currentSurveyBase);
+  $('writeback-status').textContent = '';
   // 刷新草稿列表，让「编辑中」标记落到当前这份上。放这里而非只在 saveDraft 里，
   // 是因为「续填」切换草稿走的是 openForm(keepDraft)、不触发保存——只在保存后刷新，
   // 换草稿时标记就会赖在上一份上（表单已经换了，标记没跟上）。
@@ -924,6 +951,7 @@ $('newBtn').addEventListener('click', async () => {
   priceOrigin = 'empty';
   lastCompute = null;
   currentSurveyId = '';  // 手建草稿无来源问卷，不参与拉取判重
+  currentSurveyBase = null;
   try {
     await openForm(category);
     $('xlsx-status').textContent = '';
@@ -963,6 +991,7 @@ $('xlsx').addEventListener('change', async (event) => {
   const body = await response.json();
   applyPrefillBody(body, 'excel');
   currentSurveyId = '';  // Excel 导入是手工便利，非问卷来源
+  currentSurveyBase = null;
   $('xlsx-status').textContent = file.name;
   $('xlsx-status').className = 'status done';
   try {
@@ -1037,6 +1066,8 @@ $('surveyPicker').addEventListener('click', async (event) => {
     const d = await (await fetch('/api/drafts/' + encodeURIComponent(body.existing_draft_id))).json();
     draftId = d.id;
     currentSurveyId = d.问卷ID || (body.questionnaire_id || '');
+    currentSurveyBase = d.数据.survey_base || body.survey_base || null;  // 续用草稿底版
+    currentSurveyBaseMtime = d.数据.survey_base_mtime || body.survey_base_mtime || '';
     currentProject = d.数据.project;
     subjectLevels = d.数据.subject_levels || {};
     priceOrigin = d.数据.priceOrigin || 'empty';
@@ -1056,6 +1087,8 @@ $('surveyPicker').addEventListener('click', async (event) => {
   // 问卷无比较法价（单价/离散度留 0），价由后续「选实例」重算——故 origin='empty'。
   applyPrefillBody(body, 'empty');
   currentSurveyId = body.questionnaire_id || '';
+  currentSurveyBase = body.survey_base || null;          // 存底版供「保存回问卷」合并
+  currentSurveyBaseMtime = body.survey_base_mtime || '';
   $('xlsx-status').textContent = '实勘问卷 ' + (body.questionnaire_id || '');
   $('xlsx-status').className = 'status done';
   try {
@@ -1717,6 +1750,96 @@ async function checkOnline() {
 }
 
 $('refresh-online').addEventListener('click', checkOnline);
+
+// ── 双向同步：保存回问卷（读线上→3-way 合并→同字段冲突逐字段选）────────
+function _surveyFieldLabel(field) {
+  const [section, key] = field.split('.');
+  const sec = { basic: '基本信息', subject_levels: '因素档次', asset_conditions: '资产状况' }[section] || section;
+  return sec + '·' + key;
+}
+function _surveyVal(v) { return (v === null || v === undefined) ? '（空）' : String(v); }
+
+function buildSurveyMine() {
+  // mine = 底版叠上表单当前值（只回写 basic/subject_levels/asset_conditions）；
+  // photos/gps/subjects 用底版原值——办公端不回写这三块，合并时「我没动→取线上」自动保住对方的。
+  const base = currentSurveyBase || {};
+  const basic = {};
+  for (const k of Object.keys(base.basic || {})) basic[k] = currentProject[k];
+  return {
+    basic,
+    subject_levels: { ...subjectLevels },
+    asset_conditions: { ...(currentProject.asset_conditions || {}) },
+    subjects: base.subjects,
+    photos: base.photos,
+    gps: base.gps,
+  };
+}
+
+function applyMergedToForm(merged) {
+  // 合并把线上未冲突的改动并了进来 → 刷新表单，让估价师看到合并后的真相。
+  for (const [k, v] of Object.entries(merged.basic || {})) currentProject[k] = v;
+  subjectLevels = { ...(merged.subject_levels || {}) };
+  currentProject.asset_conditions = { ...(merged.asset_conditions || {}) };
+  renderFields();
+  renderFactors();
+}
+
+let _pendingConflicts = [];
+
+async function doWriteback(resolutions) {
+  const st = $('writeback-status');
+  st.className = 'status'; st.textContent = '保存回问卷……';
+  const body = { survey_id: currentSurveyId, base: currentSurveyBase, mine: buildSurveyMine() };
+  if (resolutions) body.resolutions = resolutions;
+  let r;
+  try {
+    r = await fetch('/api/survey/writeback', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+  } catch (e) {
+    st.textContent = '保存失败：无法连接服务。'; st.className = 'status err'; return;
+  }
+  if (!r.ok) {
+    st.textContent = '保存失败：' + ((await r.json()).detail || r.status); st.className = 'status err'; return;
+  }
+  const res = await r.json();
+  if (res.status === 'conflict') { openConflictDialog(res.conflicts); return; }
+  currentSurveyBase = res.merged;
+  currentSurveyBaseMtime = res.merged_mtime;
+  applyMergedToForm(res.merged);
+  const n = res.applied_theirs_count || 0;
+  st.textContent = '已保存回问卷' + (n ? `（合并了对方 ${n} 处改动，已刷新表单）` : '');
+  st.className = 'status done';
+  scheduleDraftSave();  // 持久化新底版
+}
+
+function openConflictDialog(conflicts) {
+  _pendingConflicts = conflicts;
+  $('conflictList').innerHTML = conflicts.map((c, i) => `
+    <div style="margin:.5rem 0;padding:.4rem 0;border-top:1px solid #eee">
+      <b>${esc(_surveyFieldLabel(c.field))}</b>
+      <div><label><input type="radio" name="cf-${i}" value="mine" checked> 你的：${esc(_surveyVal(c.mine))}</label></div>
+      <div><label><input type="radio" name="cf-${i}" value="theirs"> 线上：${esc(_surveyVal(c.theirs))}</label></div>
+    </div>`).join('');
+  $('conflictDialog').showModal();
+}
+
+$('conflictDialog').addEventListener('close', async () => {
+  if ($('conflictDialog').returnValue !== 'ok') {
+    $('writeback-status').textContent = '已取消保存回问卷。'; return;
+  }
+  const resolutions = {};
+  _pendingConflicts.forEach((c, i) => {
+    const picked = document.querySelector(`input[name="cf-${i}"]:checked`);
+    resolutions[c.field] = (picked && picked.value === 'theirs') ? c.theirs : c.mine;
+  });
+  await doWriteback(resolutions);
+});
+
+$('writeback').addEventListener('click', async () => {
+  if (!currentSurveyId || !currentSurveyBase) return;
+  await doWriteback(null);
+});
 
 // 存待同步草稿：与 saveDraft 同形，只多带 待同步:true 与 lastCompute——
 // 联网后「同步定稿」要重放算术台账，没有 lastCompute 就只能出「未经系统

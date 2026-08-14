@@ -9,6 +9,7 @@
 
 from typing import Any, Protocol
 
+from serverless.survey_broker.merge import merge_content
 from serverless.survey_broker.record import (
     COL_CATEGORY,
     COL_ID,
@@ -24,7 +25,35 @@ from serverless.survey_broker.record import (
     new_survey_id,
 )
 
-__all__ = ["RecordWriter", "SurveyBrokerStore"]
+__all__ = ["RecordWriter", "SurveyBrokerStore", "SurveyConflict"]
+
+
+class SurveyConflict(Exception):
+    """save_draft 三方合并遇同字段双改：不写库，把冲突逐字段抛给调用方（handler 映射）。"""
+
+    def __init__(self, conflicts: list[dict[str, Any]], theirs_mtime: str) -> None:
+        super().__init__("问卷内容冲突，需逐字段解决")
+        self.conflicts = conflicts
+        self.theirs_mtime = theirs_mtime
+
+
+def _resolve(
+    merged: dict[str, Any], conflicts: list[dict[str, Any]], resolutions: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """把 resolutions 选定值覆盖到 merged 对应字段，返回仍未解决的冲突（与办公端同构）。"""
+    unresolved: list[dict[str, Any]] = []
+    for c in conflicts:
+        field = str(c["field"])
+        if field in resolutions:
+            section, _, key = field.partition(".")
+            merged.setdefault(section, {})
+            if resolutions[field] is None:
+                merged[section].pop(key, None)
+            else:
+                merged[section][key] = resolutions[field]
+        else:
+            unresolved.append(c)
+    return unresolved
 
 # 已进入审核流程、服务端拒绝再写的状态：待审核/已定稿。
 # 客户端（小程序）已把这两态置只读，但那只是前端提示——真正的「已定稿=终态·锁定」
@@ -69,29 +98,47 @@ class SurveyBrokerStore:
         updated_at: str,
         content: dict[str, Any],
         owners: list[str] | None = None,
+        base: dict[str, Any] | None = None,
+        resolutions: dict[str, Any] | None = None,
     ) -> str:
         """存草稿：给定 ID 且该行存在 → 原行 update；否则新开一行（无 ID 时现生成）。
 
         已进入审核流程（待审核/已定稿）的问卷拒写，护住「已定稿=终态·锁定」（见 `_LOCKED_STATUSES`）。
         owners=共有人 userid 列表（现场估价师选的），未给兜底 [filler]。
 
+        **双向同步（Phase 2）**：给了 `base`（手机端载入时的底版）且该行已存在时，读线上
+        =theirs 走 `merge_content(base, content, theirs)`——手机没改的字段取线上（保住办公端
+        刚回写的改动）。同字段双改 → 抛 `SurveyConflict`（不写），小程序逐字段选后带
+        `resolutions` 重发。`base=None`（旧客户端/首个草稿）→ 不合并、整份写入（向后兼容）。
+
         Returns:
             问卷ID（新生成的或沿用传入的）。
 
         Raises:
             ValueError: 该问卷已待审核/已定稿，不可修改（映射 400）。
+            SurveyConflict: 同字段双改、需逐字段解决（映射为冲突响应）。
         """
         sid = survey_id or new_survey_id()
         found = self._find(sid)
         if found is not None and found[1] in _LOCKED_STATUSES:
             raise ValueError(f"问卷已{found[1]}，不可修改")
+
+        to_write = content
+        if base is not None and found is not None:
+            current = self.load(sid)  # theirs = 线上当前内容
+            merged, conflicts = merge_content(base, content, current["content"])
+            unresolved = _resolve(merged, conflicts, resolutions or {})
+            if unresolved:
+                raise SurveyConflict(unresolved, current["updated_at"])
+            to_write = merged
+
         fields = content_to_fields(
             survey_id=sid,
             status=STATUS_DRAFT,
             filler=filler,
             category=category,
             updated_at=updated_at,
-            content=content,
+            content=to_write,
             owners=owners,
         )
         if found is not None:

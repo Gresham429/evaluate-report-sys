@@ -45,7 +45,7 @@ from src.engine.methods import get_method
 from src.engine.methods.base import Instance, Result
 from src.extractor.condition import GROUP_PREFIXES, read_survey_conditions
 from src.extractor.project import load_project
-from src.questionnaire.backend import SurveyPullBackend
+from src.questionnaire.backend import SurveyPullBackend, response_content
 from src.questionnaire.prefill import survey_to_prefill
 from src.web import session
 from src.knowledge_base.store import (
@@ -1018,6 +1018,9 @@ def create_app() -> FastAPI:
         payload = survey_to_prefill(response)
         existing = DraftStore(_draft_dir()).find_by_survey(response.问卷ID)
         payload["existing_draft_id"] = existing.id if existing else None
+        # 底版快照 + 底版时间：办公端草稿存下，回写时作 3-way 合并的 base（双向同步 §4）。
+        payload["survey_base"] = response_content(response)
+        payload["survey_base_mtime"] = response.更新时间
         return payload
 
     @app.post("/api/survey/review")
@@ -1043,6 +1046,37 @@ def create_app() -> FastAPI:
         backend = _survey_backend()
         results = backend.finalize(ids, session.viewer())
         return {"results": results, "ok": [k for k, v in results.items() if v == "ok"]}
+
+    @app.post("/api/survey/writeback")
+    def survey_writeback(payload: dict[str, Any]) -> dict[str, object]:
+        """办公端「保存回问卷」：读线上→3-way 合并→冲突返回或写回（双向同步 §5）。
+
+        body：`{survey_id, base, mine, resolutions?}`。无冲突则写「问卷内容」+「更新时间」，
+        不改状态/共有人；同字段冲突不写、回 `conflicts` 供前端逐字段选后带 `resolutions` 重提。
+        权限=可编辑(owner/管理员)，否则 404；待审核/已定稿锁态 400；本地模式（无问卷源）409。
+        """
+        survey_id = str(payload.get("survey_id", "") or "")
+        base = payload.get("base")
+        mine = payload.get("mine")
+        if not survey_id or not isinstance(base, dict) or not isinstance(mine, dict):
+            raise HTTPException(status_code=400, detail="survey_id/base/mine 缺失或格式错误")
+        resolutions = payload.get("resolutions")
+        if resolutions is not None and not isinstance(resolutions, dict):
+            raise HTTPException(status_code=400, detail="resolutions 须为对象")
+        backend = _survey_backend()
+        try:
+            return backend.writeback(
+                survey_id,
+                base=base,
+                mine=mine,
+                viewer=session.viewer(),
+                now=datetime.now().isoformat(timespec="seconds"),
+                resolutions=resolutions,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/factors")
     def factors(category: str, fingerprint: str | None = None) -> dict[str, object]:

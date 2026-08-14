@@ -155,6 +155,133 @@ def test_pull_reports_existing_draft_for_same_survey(
     assert body["existing_draft_id"] == saved
 
 
+def test_pull_returns_survey_base_snapshot(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """拉取带回问卷内容底版 + 底版时间，供回写做 3-way 合并的 base。"""
+    _wire(monkeypatch, _rows(_resp("42", STATUS_SUBMITTED)))
+    body = client.get("/api/survey/pull", params={"id": "42"}).json()
+    assert body["survey_base"]["basic"]["client"] == "甲"
+    assert body["survey_base"]["subject_levels"]["楼层"] == "中"
+    assert body["survey_base_mtime"] == "2026-07-19T10:00:00"
+
+
+# ------------------------------------------------------------ 双向同步：回写 /api/survey/writeback
+
+
+def _set_online(fake: _FakeClient, qid: str, content: dict[str, Any], mtime: str) -> None:
+    """直接改线上某问卷的内容 + 更新时间，模拟对方并发改动。"""
+    import json
+
+    for r in fake._rows:  # noqa: SLF001 — 测试内直捣内存假件
+        if r["fields"].get("问卷ID") == qid:
+            r["fields"]["问卷内容"] = json.dumps(content, ensure_ascii=False)
+            r["fields"]["更新时间"] = mtime
+            return
+    raise KeyError(qid)
+
+
+def test_writeback_no_conflict_merges_and_writes(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """我改一个字段、对方并发改另一个字段 → 自动合并、两处都保住、写回。"""
+    fake = _wire(monkeypatch, _rows(_resp("42", STATUS_SUBMITTED)))
+    base = client.get("/api/survey/pull", params={"id": "42"}).json()["survey_base"]
+
+    # 对方线上把 owner 改了（不同字段）
+    theirs = {**base, "basic": {**base["basic"], "owner": "对方改的"}}
+    _set_online(fake, "42", theirs, "2026-08-14T11:00:00")
+
+    # 我把 client 改了
+    mine = {**base, "basic": {**base["basic"], "client": "我改的"}}
+    r = client.post("/api/survey/writeback", json={"survey_id": "42", "base": base, "mine": mine})
+    body = r.json()
+    assert body["status"] == "saved"
+    assert body["merged"]["basic"]["client"] == "我改的"     # 我的保住
+    assert body["merged"]["basic"]["owner"] == "对方改的"     # 对方的保住
+
+    # 线上确实写了合并结果
+    after = client.get("/api/survey/pull", params={"id": "42"}).json()["survey_base"]
+    assert after["basic"]["client"] == "我改的"
+    assert after["basic"]["owner"] == "对方改的"
+
+
+def test_writeback_same_field_conflict_not_written(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """同字段双改 → 返回冲突、不写库。"""
+    fake = _wire(monkeypatch, _rows(_resp("42", STATUS_SUBMITTED)))
+    base = client.get("/api/survey/pull", params={"id": "42"}).json()["survey_base"]
+
+    theirs = {**base, "basic": {**base["basic"], "client": "对方值"}}
+    _set_online(fake, "42", theirs, "2026-08-14T11:00:00")
+    mine = {**base, "basic": {**base["basic"], "client": "我的值"}}
+
+    body = client.post(
+        "/api/survey/writeback", json={"survey_id": "42", "base": base, "mine": mine}
+    ).json()
+    assert body["status"] == "conflict"
+    assert body["conflicts"][0]["field"] == "basic.client"
+    assert body["conflicts"][0]["mine"] == "我的值"
+    assert body["conflicts"][0]["theirs"] == "对方值"
+    # 没写：线上仍是对方值
+    after = client.get("/api/survey/pull", params={"id": "42"}).json()["survey_base"]
+    assert after["basic"]["client"] == "对方值"
+
+
+def test_writeback_resolutions_resolves_and_writes(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """带 resolutions 二次提交：选定值覆盖、写回。"""
+    fake = _wire(monkeypatch, _rows(_resp("42", STATUS_SUBMITTED)))
+    base = client.get("/api/survey/pull", params={"id": "42"}).json()["survey_base"]
+    theirs = {**base, "basic": {**base["basic"], "client": "对方值"}}
+    _set_online(fake, "42", theirs, "2026-08-14T11:00:00")
+    mine = {**base, "basic": {**base["basic"], "client": "我的值"}}
+
+    body = client.post(
+        "/api/survey/writeback",
+        json={"survey_id": "42", "base": base, "mine": mine,
+              "resolutions": {"basic.client": "最终值"}},
+    ).json()
+    assert body["status"] == "saved"
+    assert body["merged"]["basic"]["client"] == "最终值"
+    after = client.get("/api/survey/pull", params={"id": "42"}).json()["survey_base"]
+    assert after["basic"]["client"] == "最终值"
+
+
+def test_writeback_rejects_non_owner_404(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """非本人（无编辑权）回写 → 404（不泄露存在性）。"""
+    _wire(monkeypatch, _rows(_resp("42", STATUS_SUBMITTED, "user-9")), operator="user-7")
+    base = {"basic": {}, "subjects": [], "subject_levels": {},
+            "asset_conditions": {}, "photos": [], "gps": None}
+    r = client.post("/api/survey/writeback", json={"survey_id": "42", "base": base, "mine": base})
+    assert r.status_code == 404
+
+
+def test_writeback_locked_status_400(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """待审核/已定稿不可回写 → 400。"""
+    _wire(monkeypatch, _rows(_resp("42", STATUS_PENDING_REVIEW, "user-7")), operator="user-7")
+    base = {"basic": {}, "subjects": [], "subject_levels": {},
+            "asset_conditions": {}, "photos": [], "gps": None}
+    r = client.post("/api/survey/writeback", json={"survey_id": "42", "base": base, "mine": base})
+    assert r.status_code == 400
+
+
+def test_writeback_local_mode_409(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """本地模式无问卷源 → 409。"""
+    base = {"basic": {}, "subjects": [], "subject_levels": {},
+            "asset_conditions": {}, "photos": [], "gps": None}
+    r = client.post("/api/survey/writeback", json={"survey_id": "42", "base": base, "mine": base})
+    assert r.status_code == 409
+
+
 def test_local_mode_blocks_with_409(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
