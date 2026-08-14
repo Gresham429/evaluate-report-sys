@@ -18,6 +18,7 @@ FILES = [
     "serverless/__init__.py",
     "serverless/survey_broker/__init__.py",
     "serverless/survey_broker/record.py",
+    "serverless/survey_broker/merge.py",
     "serverless/survey_broker/store.py",
     "serverless/survey_broker/amap.py",
     "serverless/survey_broker/identity.py",
