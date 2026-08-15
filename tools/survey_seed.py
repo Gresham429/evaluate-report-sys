@@ -102,7 +102,7 @@ def main() -> None:
     print(f"『{SHEET_NAME}』sheetId = {sheet_id}")
 
     created = ensure_survey_sheet(client, sheet_id)
-    print(f"建列：{created or '（六列都在）'}")
+    print(f"建列：{created or '（七列都在）'}")
 
     response = _sample(category)
     rid = client.insert_record(sheet_id, response_to_fields(response))
