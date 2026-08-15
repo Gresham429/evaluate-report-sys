@@ -40,7 +40,9 @@ ARCHIVE_STEM = "appraisal-report-system-windows"
 # 交付包里放什么。**刻意不放 data/**：那是估价师的实例库、草稿、基础表，
 # 由程序首次运行时自建。塞进交付包的话，下次解压升级会把人家攒的实例库连同
 # 草稿一起盖掉——升级不该是数据事故。
-_PAYLOAD_DOC = ROOT / "docs" / "使用说明.md"
+# 交付给甲方的是 docx（正式、Word 可直接打开/打印）；由 tools/build_manual_docx.py 生成。
+# docs/使用说明.md 仍留作仓库内可读源，不进交付包。
+_PAYLOAD_DOC = ROOT / "docs" / "使用说明.docx"
 
 
 def _build() -> int:
@@ -99,7 +101,7 @@ def _stage() -> Path:
     )
     shutil.copy2(ROOT / "copy.yaml", staging / "copy.yaml")
     if _PAYLOAD_DOC.exists():
-        shutil.copy2(_PAYLOAD_DOC, staging / "使用说明.md")
+        shutil.copy2(_PAYLOAD_DOC, staging / "使用说明.docx")
     return staging
 
 
