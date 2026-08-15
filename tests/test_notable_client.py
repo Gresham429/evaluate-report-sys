@@ -225,6 +225,22 @@ def test_delete_field_issues_delete() -> None:
     assert deleted == ["f1"]
 
 
+def test_delete_record_posts_recordids_to_records_delete() -> None:
+    """真机校准 2026-08-15：删记录是 POST .../records/delete，body {recordIds:[id]}
+    （原先 DELETE .../records 真机报 HTTP404「Specified api is not found」）。"""
+    seen: dict[str, Any] = {}
+
+    def handler(method: str, path: str, body: Any) -> tuple[int, str]:
+        if method == "POST" and path.endswith("/records/delete"):
+            seen["body"] = body
+            return 200, "{}"
+        return 404, "{}"
+
+    client = NotableClient("ak", "as", base_id="b", operator_id="o", transport=_token_or(handler))
+    client.delete_record("s", "rec-1")
+    assert seen["body"] == {"recordIds": ["rec-1"]}
+
+
 def test_ensure_fields_creates_only_missing() -> None:
     created: list[str] = []
 
