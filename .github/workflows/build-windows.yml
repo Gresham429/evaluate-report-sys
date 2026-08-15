@@ -17,8 +17,13 @@ name: 打包 Windows exe
 
 on:
   push:
-    tags: ["v*"]          # 打 tag 即出正式包
+    tags: ["v*"]          # 打 tag 即出正式包（甲方钉钉版，不带 seed）
   workflow_dispatch:      # 也能手动点一下就构建，不必先打 tag
+    inputs:
+      seed:
+        description: "内置初始 data/ 种子（基础表七类 + 实例库）——内部单机版用；甲方钉钉版别勾"
+        type: boolean
+        default: false
 
 permissions:
   contents: write         # 打 tag 时创建 Release 需要
@@ -58,7 +63,7 @@ jobs:
           fi
 
       - name: 打包
-        run: uv run python build_exe.py
+        run: uv run python build_exe.py ${{ inputs.seed && '--seed' || '' }}
 
       - name: 冒烟测试（暂存目录）——验它真能用，不只是编译过了
         run: uv run python tools/smoke_exe.py "dist/_package/appraisal-report-system/appraisal-report-system.exe"
