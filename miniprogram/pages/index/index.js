@@ -3,10 +3,9 @@ const store = require('../../utils/store');
 const sync = require('../../utils/sync');
 const app = getApp();
 
-/** ISO 时间戳 → "MM-DD HH:mm"（列表展示用，去掉原始 T/毫秒/Z）。 */
+/** 时间戳 → 北京时间 "MM-DD HH:mm"（列表展示）。转换逻辑集中在 store，兼容旧 UTC/新 +08:00。 */
 function fmtTime(s) {
-  const t = String(s || '');
-  return t.length >= 16 ? t.slice(5, 16).replace('T', ' ') : t;
+  return store.fmtBeijingShort(s);
 }
 
 Page({
@@ -89,8 +88,13 @@ Page({
   },
   _doDelete(id) {
     store.deleteDraft(id).then((serverId) => {
-      if (serverId) broker.request('deleteDraft', { survey_id: serverId }).catch(() => {});
-      this.loadMyDrafts();
+      // 必须**等**服务端删完再 loadMyDrafts——否则 listSurveys 可能在删除落库前返回该行，
+      // reconcileFromServer 又把它加回来，表现为「删不掉」（真机竞态）。离线（无 serverId
+      // 或删除失败）时也照常刷新，只保证本地已删。
+      const done = serverId
+        ? broker.request('deleteDraft', { survey_id: serverId }).catch(() => {})
+        : Promise.resolve();
+      return done.then(() => this.loadMyDrafts());
     });
   },
 });

@@ -205,7 +205,7 @@ Page({
       subjectLevels: this.data.subjectLevels || {}, assetConditions: this.data.assetConditions || {},
       base: this.data.base || null,   // 底版随草稿持久化（否则自动存盘会把它冲掉）
       owners: this._ensureFiller(this.data.owners), ownerNames: this.data.ownerNames || {},
-      updatedAt: new Date().toISOString(),
+      updatedAt: store.nowStamp(),
       status: this.data.serverStatus || '草稿',
       dirty: true, needsSync: this.data.needsSync, pendingSubmit: this.data.pendingSubmit,
     }, extra || {});
@@ -269,7 +269,7 @@ Page({
       survey_id: this.data.survey_id || undefined,
       filler: app.globalData.filler || '',
       category: this.data.form.category,
-      updated_at: new Date().toISOString(),
+      updated_at: store.nowStamp(),
       content: this._content(),
     };
   },

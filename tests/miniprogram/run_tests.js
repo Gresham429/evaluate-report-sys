@@ -753,6 +753,29 @@ async function main() {
   await tick();
   eq(pM5.data.owners, ['u1'], 'M5 填报人不可删');
 
+  // ===== N. 时区（北京时间）+ 删除竞态修复 =====
+  console.log('N. 时区 + 删除');
+
+  const ts = store.nowStamp();
+  ok(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+08:00$/.test(ts), 'N1 nowStamp 为 +08:00 ISO：' + ts);
+  eq(store.fmtBeijingShort('2026-08-15T02:30:00.000Z'), '08-15 10:30', 'N2 UTC 02:30Z → 北京 10:30');
+  eq(store.fmtBeijingShort('2026-08-15T10:30:00+08:00'), '08-15 10:30', 'N3 +08:00 10:30 → 10:30');
+  eq(store.fmtBeijingShort('t1'), 't1', 'N4 无法解析退回原串（不炸）');
+
+  // N5 删除已同步草稿：等服务端删完再刷新 → 行删掉、不再被 reconcile 加回
+  resetEnv();
+  getApp().globalData.filler = 'u1';
+  server.state.drafts['srv-del'] = { category: '办公', status: '草稿', filler: 'u1', updated_at: 't',
+    content: { basic: {}, subjects: [], subject_levels: {}, asset_conditions: {}, photos: [], gps: null },
+    owners: ['u1'] };
+  await store.saveDraftLocal({ id: 'local-del', serverId: 'srv-del', category: '办公',
+    status: '草稿', basic: {}, updatedAt: 't', dirty: false });
+  const pN = makePage(indexCfg);
+  pN._doDelete('local-del');
+  await tick();
+  ok(!server.state.drafts['srv-del'], 'N5 删除后服务端行也删掉');
+  ok(!(pN.data.drafts || []).some((r) => r.open_id === 'local-del'), 'N5 删除后不再出现在草稿列表');
+
   console.log(`\n结果：${PASS} 通过，${FAIL} 失败`);
   process.exit(FAIL ? 1 : 0);
 }

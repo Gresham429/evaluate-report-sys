@@ -60,6 +60,31 @@ function newLocalId() {
   return 'local-' + Date.now() + '-' + Math.floor(Math.random() * 1e6);
 }
 
+function _pad(n) { return (n < 10 ? '0' : '') + n; }
+
+/** 当前北京时间的 ISO 串（带 +08:00 偏移，无歧义）：如 "2026-08-15T10:30:00+08:00"。
+ *  之前用 new Date().toISOString()（UTC/Z）→ 列表显示比北京晚 8 小时；改用本函数生成，
+ *  办公端按偏移解析也正确。 */
+function nowStamp() {
+  var b = new Date(Date.now() + 8 * 3600 * 1000);   // 移到北京，再读 UTC 字段即北京各位
+  return b.getUTCFullYear() + '-' + _pad(b.getUTCMonth() + 1) + '-' + _pad(b.getUTCDate())
+    + 'T' + _pad(b.getUTCHours()) + ':' + _pad(b.getUTCMinutes()) + ':' + _pad(b.getUTCSeconds())
+    + '+08:00';
+}
+
+/** 时间戳 → 北京时间 "MM-DD HH:mm"（列表展示）。兼容旧的 UTC/Z 与新的 +08:00：
+ *  能解析就转北京；解析不了（如测试里的 't1'）退回原切片逻辑。 */
+function fmtBeijingShort(s) {
+  var d = new Date(s);
+  if (isNaN(d.getTime())) {
+    var t = String(s || '');
+    return t.length >= 16 ? t.slice(5, 16).replace('T', ' ') : t;
+  }
+  var b = new Date(d.getTime() + 8 * 3600 * 1000);
+  return _pad(b.getUTCMonth() + 1) + '-' + _pad(b.getUTCDate())
+    + ' ' + _pad(b.getUTCHours()) + ':' + _pad(b.getUTCMinutes());
+}
+
 function _draftKey(id) { return DRAFT_PREFIX + id; }
 
 function readIndex() {
@@ -230,7 +255,7 @@ module.exports = {
   assign: assign,
   isSubmittedStatus: isSubmittedStatus, isReadonlyStatus: isReadonlyStatus,
   getStorage: getStorage, setStorage: setStorage, removeStorage: removeStorage,
-  newLocalId: newLocalId,
+  newLocalId: newLocalId, nowStamp: nowStamp, fmtBeijingShort: fmtBeijingShort,
   readIndex: readIndex, writeIndex: writeIndex, upsertIndexEntry: upsertIndexEntry,
   saveDraftLocal: saveDraftLocal, loadDraftLocal: loadDraftLocal,
   attachServerId: attachServerId, clearDraftContent: clearDraftContent,
