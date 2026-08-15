@@ -17,13 +17,8 @@ name: 打包 Windows exe
 
 on:
   push:
-    tags: ["v*"]          # 打 tag 即出正式包（甲方钉钉版，不带 seed）
+    tags: ["v*"]          # 打 tag 即出正式包
   workflow_dispatch:      # 也能手动点一下就构建，不必先打 tag
-    inputs:
-      seed:
-        description: "内置初始 data/ 种子（基础表七类 + 实例库）——内部单机版用；甲方钉钉版别勾"
-        type: boolean
-        default: false
 
 permissions:
   contents: write         # 打 tag 时创建 Release 需要
@@ -63,7 +58,7 @@ jobs:
           fi
 
       - name: 打包
-        run: uv run python build_exe.py ${{ inputs.seed && '--seed' || '' }}
+        run: uv run python build_exe.py
 
       - name: 冒烟测试（暂存目录）——验它真能用，不只是编译过了
         run: uv run python tools/smoke_exe.py "dist/_package/appraisal-report-system/appraisal-report-system.exe"
@@ -101,8 +96,8 @@ jobs:
             再双击 `appraisal-report-system/appraisal-report-system.exe`，浏览器
             自动打开。（别在压缩软件里直接双击 exe——那样模板没解压出来，出不了报告。）
 
-            **首次使用须先导入基础表**：到「基础表」页，导入贵司的
-            「实勘表、比较法.xlsx」，按类别各一次。详见包内 `使用说明.docx`。
+            **开箱即用**：已内置七类估价知识与起步实例，装好直接能出报告。要用公司最新版
+            知识，到「基础表」页点「从多维表拉取」。详见包内 `使用说明.docx`。
 
             **升级时只替换 exe 与 templates/、copy.yaml，不要动 `data/`**
             ——实例库、草稿、基础表各版本都在里面。

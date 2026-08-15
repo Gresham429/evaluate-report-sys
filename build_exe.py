@@ -44,28 +44,6 @@ ARCHIVE_STEM = "appraisal-report-system-windows"
 # docs/使用说明.md 仍留作仓库内可读源，不进交付包。
 _PAYLOAD_DOC = ROOT / "docs" / "使用说明.docx"
 
-# 内部单机版可选内置一份初始 data/ 种子（基础表七类 + 实例库），让离线单机机器开箱即用、
-# 不必从多维表拉取。**仅用于首次分发的干净种子**——升级时别用 --seed，否则会覆盖用户已攒的库。
-# 交付给甲方的钉钉版不带 seed（估价知识/实例来自公司多维表）。
-_SEED_BASETABLES = ROOT / "seed" / "基础表"
-_SEED_INSTANCES = ROOT / "data" / "实例库.json"
-
-
-def _wants_seed() -> bool:
-    """构建单机内置种子版：命令行带 --seed。"""
-    return "--seed" in sys.argv
-
-
-def _seed_into(staging: Path) -> None:
-    """把初始 data/ 种子（基础表 + 实例库）内置进交付包。"""
-    data = staging / "data"
-    data.mkdir(parents=True, exist_ok=True)
-    if _SEED_BASETABLES.exists():
-        shutil.copytree(_SEED_BASETABLES, data / "基础表", ignore=shutil.ignore_patterns(".*"))
-    if _SEED_INSTANCES.exists():
-        shutil.copy2(_SEED_INSTANCES, data / "实例库.json")
-    logger.info("已内置初始种子 data/（基础表七类 + 实例库）")
-
 
 def _build() -> int:
     command = [
@@ -77,6 +55,10 @@ def _build() -> int:
         # 离线开箱即用；本地非空则跳过，升级不覆盖。见 __main__.main() 的 seed 调用。
         "--add-data",
         f"resources/默认基础表{';' if sys.platform == 'win32' else ':'}resources/默认基础表",
+        # 同理内置默认实例库（12 条起步实例，单文件）：首次运行本地无实例库时铺进 data/实例库.json。
+        # 打进 exe 由程序解出/拷入，中文名不经解压软件、绝无乱码（§坑7）。
+        "--add-data",
+        f"resources/默认实例库.json{';' if sys.platform == 'win32' else ':'}resources",
         # 只在 Windows 上隐藏控制台：交付 exe 双击不该弹出黑终端。隐藏后 stdout/
         # stderr 变 None，日志由 __main__._setup_logging() 接到 exe 旁的日志文件。
         # **仅限 win32**：--noconsole 在 macOS 上会打成 .app 包，本地验证的
@@ -124,8 +106,6 @@ def _stage() -> Path:
     shutil.copy2(ROOT / "copy.yaml", staging / "copy.yaml")
     if _PAYLOAD_DOC.exists():
         shutil.copy2(_PAYLOAD_DOC, staging / "使用说明.docx")
-    if _wants_seed():
-        _seed_into(staging)
     return staging
 
 

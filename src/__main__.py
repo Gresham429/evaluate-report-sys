@@ -16,6 +16,8 @@ import uvicorn
 
 from src.knowledge_base.seed import seed_default_base_tables_if_empty
 from src.knowledge_base.store import DEFAULT_STORE_DIR
+from src.library.seed import seed_default_instances_if_empty
+from src.library.store import DEFAULT_STORE_PATH
 from src.paths import app_dir, bundled_dir
 from src.web.app import create_app
 
@@ -93,6 +95,9 @@ def main() -> None:
     # 首次运行（本地基础表为空）铺内置的 7 张默认基础表，离线开箱即用；本地非空则跳过，
     # 升级不覆盖估价师攒的版本。之后可在基础表页「从钉钉拉取」更新。
     seed_default_base_tables_if_empty(DEFAULT_STORE_DIR, bundled_dir("resources", "默认基础表"))
+    # 同理铺内置的默认实例库（12 条起步实例）；本地已有则跳过、升级不覆盖。钉钉模式实例走多维表、
+    # 本地这份不参与，播了也无妨。
+    seed_default_instances_if_empty(DEFAULT_STORE_PATH, bundled_dir("resources", "默认实例库.json"))
     url = f"http://{HOST}:{PORT}/"
     logger.info("启动 %s", url)
     threading.Timer(1.0, lambda: webbrowser.open(url)).start()
