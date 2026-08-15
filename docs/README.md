@@ -121,7 +121,7 @@ app 启动 load `.env`；`GET /api/online` 三态（本地／多维表在线／�
    `/api/survey/pull` 回 `existing_draft_id`、前端命中则续填不新建。见 [plan](superpowers/plans/2026-08-14-拉取草稿去重.md)。
    交付前真机：对真实多维表点「拉同一问卷两次=续上同一份」。
 2. ~~**小程序「选共有人」UI**~~ ✅ **已做**（2026-08-14）：小程序选人存 owners + saveDraft 带 owners；
-   broker `save_draft` owners **并集**（谁都不丢）+ `load` 回 owners（harness 129 通过）。⚠️ 钉钉选人 API 待真机校准 + 须小程序重传 + broker 重部署。[plan](superpowers/plans/2026-08-14-小程序选共有人.md)
+   broker `save_draft` owners **并集**（谁都不丢）+ `load` 回 owners（harness 129 通过）。✅ 选人 API 真机验通（2026-08-15，选人→进列表）、broker 已重部署 + 小程序已重传；owners 并集/办公端可见待真机点。[plan](superpowers/plans/2026-08-14-小程序选共有人.md)
 3. **双向同步：回写 + 字段级 3-way 合并 + 冲突弹窗** — **Phase 1 办公端✅已做**（2026-08-14，本地未 push）：
    `merge_content`（两侧镜像+契约对拍）、`/api/survey/writeback`、办公端「保存回问卷」+冲突弹窗（Playwright 冒烟通过）。
    **Phase 2✅代码全就绪**（2026-08-14）：broker `save_draft` 合并+`SurveyConflict`；小程序 `sync.js` 带 base+冲突处理+`resolveConflict`、`form.js` 捕获 base、新增 `pages/conflict/`（harness 121 通过）。**仍待：broker 重部署（若尚未）+ 小程序重传 + 真机联调**。

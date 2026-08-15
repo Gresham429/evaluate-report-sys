@@ -80,9 +80,10 @@ Page({
     this._autosave();
   },
 
-  // 从钉钉通讯录选共有人。⚠️ 选人 API 名/回执形状待真机校准（不同基础库/端有差异）：
-  //  常见候选 dd.chooseInteriorContacts / dd.complexChoose / dd.chooseDepartmentMemberOfEnterprise。
-  //  真机联调时对准可用 API 与其 result 字段（userid/name），映射进 _addOwners 即可。
+  // 从钉钉通讯录选共有人。**真机验通（2026-08-15）**：选人面板正常弹出、选中人进共有人列表。
+  //  刻意保留「取三候选里第一个可用 API + 多字段兜底映射」的写法——它跨基础库/端稳健，
+  //  真机实测即经此路径通过；不同环境哪个 API 可用会变，故不写死某一个。
+  //  （回执字段兜底见 _addOwners：userid/userId/emplId/id + name/userName。）
   onPickOwners() {
     if (this._lockedGuard()) return;
     const self = this;
