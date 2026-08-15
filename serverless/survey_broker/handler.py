@@ -46,7 +46,7 @@ class _Store(Protocol):
 
     def delete(self, survey_id: str) -> None: ...
 
-    def list_by_filler(self, filler: str) -> list[dict[str, Any]]: ...
+    def list_for_user(self, userid: str) -> list[dict[str, Any]]: ...
 
 
 class _Amap(Protocol):
@@ -135,8 +135,9 @@ def dispatch(
             survey_id = str(_require(payload, "survey_id"))
             return 200, store.load(survey_id)
         if action == "listSurveys":
-            filler = str(_require(payload, "filler"))
-            return 200, {"surveys": store.list_by_filler(filler)}
+            # payload 键仍叫 filler（=当前登录人 userid，小程序无需改），但语义是「我有份的」：
+            # 按共有人过滤（含被别人加为共有人的）。见 store.list_for_user。
+            return 200, {"surveys": store.list_for_user(str(_require(payload, "filler")))}
         if action == "submit":
             survey_id = str(_require(payload, "survey_id"))
             store.submit(survey_id)
@@ -157,6 +158,11 @@ def dispatch(
         return 404, {"error": f"未找到：{exc}"}
     except ValueError as exc:
         return 400, {"error": str(exc)}
+    except Exception as exc:  # noqa: BLE001  顶层请求边界：任何未预期异常（如 NotableClient 的
+        # RuntimeError、多维表接口报错）都回**干净 500 + 记满栈**，而不是让它冒成 FC 的不透明 500
+        # ——否则钉钉端只看到「http status error」，查不出根因。FC 日志里能看到真实消息。
+        logger.exception("broker dispatch 未预期异常：action=%s", action)
+        return 500, {"error": f"服务器内部错误：{exc}"}
 
 
 def handler(event: bytes | dict[str, Any], context: Any) -> dict[str, Any]:
@@ -193,20 +199,25 @@ def handler(event: bytes | dict[str, Any], context: Any) -> dict[str, Any]:
     action = str(body.get("action") or "")
     payload = body.get("payload") or {}
 
-    client = NotableClient(
-        os.environ["DINGTALK_APP_KEY"],
-        os.environ["DINGTALK_APP_SECRET"],
-        base_id=os.environ["NOTABLE_BASE_ID"],
-        operator_id=os.environ["NOTABLE_OPERATOR_ID"],
-    )
-    store = SurveyBrokerStore(client, os.environ["NOTABLE_SURVEY_SHEET"])
-    amap = AmapClient(os.environ["AMAP_KEY"])
-    identity = DingtalkIdentity(client.access_token)
-    media = DingtalkMedia(client.access_token)
-
-    status, result = dispatch(
-        action, payload, store=store, amap=amap, identity=identity, media=media
-    )
+    # 构造客户端（读 env）与 dispatch 都兜底：缺环境变量(KeyError)、凭据/网络异常都回干净 500 +
+    # 记满栈，避免 FC 抛不透明 500（钉钉端只显示 http status error，查不出根因）。
+    try:
+        client = NotableClient(
+            os.environ["DINGTALK_APP_KEY"],
+            os.environ["DINGTALK_APP_SECRET"],
+            base_id=os.environ["NOTABLE_BASE_ID"],
+            operator_id=os.environ["NOTABLE_OPERATOR_ID"],
+        )
+        store = SurveyBrokerStore(client, os.environ["NOTABLE_SURVEY_SHEET"])
+        amap = AmapClient(os.environ["AMAP_KEY"])
+        identity = DingtalkIdentity(client.access_token)
+        media = DingtalkMedia(client.access_token)
+        status, result = dispatch(
+            action, payload, store=store, amap=amap, identity=identity, media=media
+        )
+    except Exception as exc:  # noqa: BLE001  顶层边界，见 dispatch 同款兜底注释
+        logger.exception("broker handler 未预期异常：action=%s", action)
+        status, result = 500, {"error": f"服务器内部错误：{exc}"}
     return {
         "statusCode": status,
         "headers": {"Content-Type": "application/json"},

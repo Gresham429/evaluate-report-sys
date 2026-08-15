@@ -54,11 +54,11 @@ class FakeStore:
             raise ValueError("已提交问卷不可删除")
         del self.rows[survey_id]
 
-    def list_by_filler(self, filler: str) -> list[dict[str, Any]]:
+    def list_for_user(self, userid: str) -> list[dict[str, Any]]:
         return [
             {"survey_id": sid, "status": r.get("status", ""),
              "category": r.get("category", ""), "updated_at": r.get("updated_at", "")}
-            for sid, r in self.rows.items() if r.get("filler") == filler
+            for sid, r in self.rows.items() if userid in (r.get("owners") or [r.get("filler")])
         ]
 
 
@@ -132,6 +132,20 @@ def test_dispatch_save_draft_forwards_base_and_resolutions() -> None:
     )
     assert store.last_base == {"basic": {"a": "1"}}
     assert store.last_resolutions == {"basic.a": "x"}
+
+
+def test_dispatch_unexpected_error_maps_to_500() -> None:
+    """未预期异常（如 NotableClient 的 RuntimeError）→ 干净 500 + 消息，而非不透明崩溃。"""
+    class BoomStore(FakeStore):
+        def load(self, survey_id: str) -> dict[str, Any]:
+            raise RuntimeError("多维表挂了")
+
+    status, body = dispatch(
+        "loadDraft", {"survey_id": "x"},
+        store=BoomStore(), amap=FakeAmap(), identity=FakeIdentity(),
+    )
+    assert status == 500
+    assert "多维表挂了" in body["error"]
 
 
 def test_dispatch_save_draft_conflict_maps_to_conflict_body() -> None:

@@ -367,3 +367,22 @@ def test_load_returns_owners() -> None:
     store.save_draft(survey_id="q1", filler="u1", category="住宅", updated_at="t1",
                      content=_content(), owners=["u1", "a"])
     assert store.load("q1")["owners"] == ["u1", "a"]
+
+
+def test_list_for_user_includes_owned_not_just_created() -> None:
+    """手机端「我的问卷」按共有人过滤：自己建的 + 被别人加为共有人的都在；无关的不含。"""
+    client = FakeClient()
+    store = SurveyBrokerStore(client, _SHEET)
+    store.save_draft(survey_id="q1", filler="u1", category="住宅", updated_at="t",
+                     content=_content(), owners=["u1"])
+    store.save_draft(survey_id="q2", filler="u2", category="住宅", updated_at="t",
+                     content=_content(), owners=["u2", "u1"])   # u2 建、把 u1 加为共有人
+    store.save_draft(survey_id="q3", filler="u3", category="住宅", updated_at="t",
+                     content=_content(), owners=["u3"])
+    assert {r["survey_id"] for r in store.list_for_user("u1")} == {"q1", "q2"}
+    assert {r["survey_id"] for r in store.list_for_user("u3")} == {"q3"}
+
+
+def test_list_for_user_empty_userid_is_empty() -> None:
+    store = SurveyBrokerStore(FakeClient(), _SHEET)
+    assert store.list_for_user("") == []

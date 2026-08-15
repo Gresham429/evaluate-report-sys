@@ -92,8 +92,13 @@ function makeServer() {
       return { survey_id: sid };
     }
     if (a === 'listSurveys') {
+      // 按共有人过滤（含被别人加为共有人的）；owners 缺省兜底 [filler]。同 broker list_for_user。
       const surveys = Object.keys(state.drafts)
-        .filter((sid) => state.drafts[sid].filler === p.filler)
+        .filter((sid) => {
+          const d = state.drafts[sid];
+          const owners = d.owners || (d.filler ? [d.filler] : []);
+          return owners.indexOf(p.filler) >= 0;
+        })
         .map((sid) => ({ survey_id: sid, status: state.drafts[sid].status,
           category: state.drafts[sid].category, updated_at: state.drafts[sid].updated_at }));
       return { surveys };
@@ -775,6 +780,17 @@ async function main() {
   await tick();
   ok(!server.state.drafts['srv-del'], 'N5 删除后服务端行也删掉');
   ok(!(pN.data.drafts || []).some((r) => r.open_id === 'local-del'), 'N5 删除后不再出现在草稿列表');
+
+  // N6 入口列表按共有人：别人建的、把我加为共有人的问卷也出现（bug#4）
+  resetEnv();
+  server.state.drafts['srv-shared'] = { category: '办公', status: '已提交', filler: 'u2', updated_at: 't',
+    owners: ['u2', 'u1'],
+    content: { basic: {}, subjects: [], subject_levels: {}, asset_conditions: {}, photos: [], gps: null } };
+  const pN2 = makePage(indexCfg);
+  pN2.onLoad();           // auth → whoami(u1) → loadMyDrafts → listSurveys(按共有人)
+  await tick();
+  const allRows = (pN2.data.submittedGroups || []).reduce((a, g) => a.concat(g.rows), []);
+  ok(allRows.some((r) => r.survey_id === 'srv-shared'), 'N6 入口含被加为共有人的问卷（非本人建）');
 
   console.log(`\n结果：${PASS} 通过，${FAIL} 失败`);
   process.exit(FAIL ? 1 : 0);

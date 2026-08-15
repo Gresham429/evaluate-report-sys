@@ -211,12 +211,19 @@ class SurveyBrokerStore:
             raise ValueError(f"问卷已{found[1]}，不可再提交")
         self._client.update_record(self._sheet, found[0], {COL_STATUS: STATUS_SUBMITTED})
 
-    def list_by_filler(self, filler: str) -> list[dict[str, Any]]:
-        """某填报人的全部问卷摘要（不含内容）——供手机端「我的问卷」跨设备查看。"""
+    def list_for_user(self, userid: str) -> list[dict[str, Any]]:
+        """当前用户**有份**的问卷摘要（不含内容）——供手机端「我的问卷」。
+
+        判据改为「userid ∈ 共有人」（不再只按填报人）：现在有共有人机制，别人把你加为
+        共有人的问卷你也该看到/能改（与办公端 ACL 一致）。填报人恒在共有人内，故自己建的
+        照常在列。空 userid → 空（fail-closed，认不出人就什么都不给）。
+        """
+        if not userid:
+            return []
         out: list[dict[str, Any]] = []
         for rec in self._client.list_records(self._sheet):
             fields = rec.get("fields", {})
-            if str(fields.get(COL_USER, "")) == filler:
+            if userid in owners_from_fields(fields):
                 out.append({
                     "survey_id": str(fields.get(COL_ID, "")),
                     "status": str(fields.get(COL_STATUS, "")),
