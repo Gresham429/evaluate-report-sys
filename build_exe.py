@@ -44,8 +44,9 @@ ARCHIVE_STEM = "appraisal-report-system-windows"
 # docs/使用说明.md 仍留作仓库内可读源，不进交付包。
 _PAYLOAD_DOC = ROOT / "docs" / "使用说明.docx"
 # 联钉钉部署配置模板（非敏感、可随包发）：目标机器把它复制成 .env、填真实值放 exe 旁即联多维表。
-# 真实 .env（含 app secret）由公司内部分发，不进本包、不进 Release。
-_PAYLOAD_ENV_TEMPLATE = ROOT / ".env.example"
+# 真实 .env（含 app secret）由公司内部分发，不进本包、不进 Release。仓库根 .env.example 是 dev 用的
+# （DEEPSEEK），与本部署模板无关，故本模板单放 deploy/。
+_PAYLOAD_ENV_TEMPLATE = ROOT / "deploy" / "office.env.example"
 
 
 def _build() -> int:
