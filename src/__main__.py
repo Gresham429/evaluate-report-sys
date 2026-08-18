@@ -34,7 +34,8 @@ PORT = 8765
 APP_ID = "appraisal-report-system"
 # 关网页自动停服：前端每几秒心跳，超过 GRACE 秒没心跳（关了网页）→ 优雅停服退出。
 # GRACE 给足，避免刷新页面/短暂卡顿误杀；只在收到过首拍后才生效（页面没加载不动手）。
-_IDLE_GRACE_S = 15.0
+# 登录扫码另有更长宽限（`mark_login`，见 app.py），期间绝不停服，否则回调打到死服务、进不去。
+_IDLE_GRACE_S = 30.0
 _WATCH_INTERVAL_S = 3.0
 # 运行期由 Python 写到 exe 旁边——中文名无妨（同 data/草稿/，UTF-16 写 NTFS 名字总对）；
 # 会被第三方解压软件搞乱码的只有随 zip 发出去的文件，这个不是。
@@ -129,8 +130,15 @@ def _our_app_running(host: str, port: int, *, timeout: float = 1.5) -> bool:
 
 
 def _should_shutdown(heartbeat: Heartbeat, *, grace: float) -> bool:
-    """页面已加载过(armed) 且 超过 grace 秒没心跳(关了网页) → 该停服。未武装恒 False。"""
-    return heartbeat.armed and heartbeat.idle_seconds() > grace
+    """页面已加载过(armed) 且 超过 grace 秒没心跳(关了网页) → 该停服。
+
+    未武装恒 False；**登录扫码宽限内恒 False**（浏览器在钉钉页、收不到心跳，但不能停服）。
+    """
+    return (
+        heartbeat.armed
+        and not heartbeat.in_login_grace()
+        and heartbeat.idle_seconds() > grace
+    )
 
 
 def _start_shutdown_watchdog(

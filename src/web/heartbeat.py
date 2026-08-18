@@ -23,12 +23,27 @@ class Heartbeat:
         self._lock = threading.Lock()
         self._last = 0.0
         self._armed = False
+        self._login_deadline = 0.0
 
     def beat(self) -> None:
         """收到一次心跳：记时间戳，并武装（首拍后看门狗才开始盯）。"""
         with self._lock:
             self._last = self._clock()
             self._armed = True
+
+    def mark_login(self, grace_seconds: float) -> None:
+        """点了钉钉登录：此后 grace_seconds 内绝不停服。
+
+        登录时浏览器会跳到钉钉扫码页（别的域名），我们的页面收不到心跳；若这期间停服，
+        回调会打到已死的服务、登录进不去。故给足扫码窗口，窗口内看门狗不动手。
+        """
+        with self._lock:
+            self._login_deadline = self._clock() + grace_seconds
+
+    def in_login_grace(self) -> bool:
+        """是否仍在「登录扫码宽限」内（此间不许停服）。"""
+        with self._lock:
+            return self._clock() < self._login_deadline
 
     @property
     def armed(self) -> bool:

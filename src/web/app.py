@@ -994,6 +994,9 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=409, detail="未配应用凭据（YIDA_APP_KEY/SECRET），无法登录")
         state = secrets.token_urlsafe(16)
         session.begin_login(state)
+        # 登录期间浏览器跳去钉钉扫码页、本页收不到心跳；给 5 分钟扫码窗口，期间绝不自动停服，
+        # 否则回调打到已死的服务、登录进不去（真机暴露的 bug）。
+        heartbeat.mark_login(300.0)
         return RedirectResponse(oauth.build_auth_url(config.login_redirect_uri(), state))
 
     @app.get("/auth/callback")
