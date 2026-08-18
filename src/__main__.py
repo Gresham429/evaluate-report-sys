@@ -10,6 +10,7 @@ import os
 import socket
 import sys
 import threading
+import time
 import urllib.request
 import webbrowser
 from pathlib import Path
@@ -23,6 +24,7 @@ from src.library.seed import seed_default_instances_if_empty
 from src.library.store import DEFAULT_STORE_PATH
 from src.paths import app_dir, bundled_dir
 from src.web.app import create_app
+from src.web.heartbeat import Heartbeat
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +32,10 @@ HOST = "127.0.0.1"
 PORT = 8765
 # 本程序的身份标识——`/api/ping` 返回它，单实例守卫据此认「8765 上是不是本程序」。
 APP_ID = "appraisal-report-system"
+# 关网页自动停服：前端每几秒心跳，超过 GRACE 秒没心跳（关了网页）→ 优雅停服退出。
+# GRACE 给足，避免刷新页面/短暂卡顿误杀；只在收到过首拍后才生效（页面没加载不动手）。
+_IDLE_GRACE_S = 15.0
+_WATCH_INTERVAL_S = 3.0
 # 运行期由 Python 写到 exe 旁边——中文名无妨（同 data/草稿/，UTF-16 写 NTFS 名字总对）；
 # 会被第三方解压软件搞乱码的只有随 zip 发出去的文件，这个不是。
 LOG_FILENAME = "运行日志.log"
@@ -122,6 +128,31 @@ def _our_app_running(host: str, port: int, *, timeout: float = 1.5) -> bool:
     return isinstance(data, dict) and data.get("app") == APP_ID
 
 
+def _should_shutdown(heartbeat: Heartbeat, *, grace: float) -> bool:
+    """页面已加载过(armed) 且 超过 grace 秒没心跳(关了网页) → 该停服。未武装恒 False。"""
+    return heartbeat.armed and heartbeat.idle_seconds() > grace
+
+
+def _start_shutdown_watchdog(
+    server: uvicorn.Server,
+    heartbeat: Heartbeat,
+    *,
+    grace: float = _IDLE_GRACE_S,
+    interval: float = _WATCH_INTERVAL_S,
+) -> None:
+    """后台守护线程：没人看网页了就让 uvicorn 优雅停服（server.should_exit）。"""
+
+    def _watch() -> None:
+        while not server.should_exit:
+            time.sleep(interval)
+            if _should_shutdown(heartbeat, grace=grace):
+                logger.info("浏览器已关闭（%.0f 秒无心跳），自动停服退出。", heartbeat.idle_seconds())
+                server.should_exit = True
+                return
+
+    threading.Thread(target=_watch, daemon=True).start()
+
+
 def main() -> None:
     _setup_logging()
     _load_dotenv()
@@ -147,7 +178,10 @@ def main() -> None:
     seed_default_instances_if_empty(DEFAULT_STORE_PATH, bundled_dir("resources", "默认实例库.json"))
     logger.info("启动 %s", url)
     threading.Timer(1.0, lambda: webbrowser.open(url)).start()
-    uvicorn.run(create_app(), host=HOST, port=PORT, log_level="warning")
+    app = create_app()
+    server = uvicorn.Server(uvicorn.Config(app, host=HOST, port=PORT, log_level="warning"))
+    _start_shutdown_watchdog(server, app.state.heartbeat)   # 关网页无心跳 → 优雅停服退出
+    server.run()
 
 
 if __name__ == "__main__":

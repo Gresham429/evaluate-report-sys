@@ -2341,4 +2341,9 @@ function applyAuthGate(me) {
     gate.hidden = true;
   }
 }
+
+// 浏览器心跳：页面开着就每 3 秒打一拍；关掉本网页后心跳停，程序会自动停服退出——
+// 「关网页 = 关程序」，不在后台留驻、也不占端口。立即先打一拍尽早武装看门狗。
+fetch('/api/heartbeat').catch(function () {});
+setInterval(function () { fetch('/api/heartbeat').catch(function () {}); }, 3000);
 </script>

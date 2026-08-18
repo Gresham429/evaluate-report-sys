@@ -60,6 +60,7 @@ from src.knowledge_base.backend import LocalFileBaseTableBackend
 from src.knowledge_base.sync import pull as pull_base_tables
 from src.knowledge_base.sync import push_version as push_base_table
 from src.version import __version__
+from src.web.heartbeat import Heartbeat
 from src.dingtalk.factory import notable_base_table_backend
 from src.ledger.model import BaseTableUse, Deviation, InstanceUse, LedgerEntry, MethodUse
 from src.ledger.model import to_dict as ledger_to_dict
@@ -540,11 +541,13 @@ def _survey_backend() -> SurveyPullBackend:
 def create_app() -> FastAPI:
     """构建 FastAPI 应用。"""
     app = FastAPI(title="房地产估价报告生成系统", docs_url=None, redoc_url=None)
+    heartbeat = Heartbeat()          # 浏览器心跳：关网页 → __main__ 看门狗自动停服
+    app.state.heartbeat = heartbeat
 
     # 硬门禁（仅钉钉模式）：未登录/未授权者只能访问「首页壳 + 登录 + 状态查询」，其余数据接口 403。
     # 前端会据 /api/me 显示门禁遮罩；本中间件是服务端兜底，防绕过前端直连接口。本地单机模式不启用。
     _gate_exempt = frozenset({
-        "/", "/api/me", "/api/online", "/api/ping",
+        "/", "/api/me", "/api/online", "/api/ping", "/api/heartbeat",
         "/auth/login", "/auth/callback", "/auth/logout", "/favicon.ico",
     })
 
@@ -564,6 +567,15 @@ def create_app() -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
         return HTMLResponse((_STATIC / "index.html").read_text(encoding="utf-8"))
+
+    @app.get("/api/heartbeat")
+    def heartbeat_beat() -> dict[str, bool]:
+        """前端页面每几秒打一次；关掉网页后心跳停，__main__ 看门狗宽限后自动停服。
+
+        免登豁免（在 `_gate_exempt` 里），钉钉模式登录页也要能续命，否则登录中被误停。
+        """
+        heartbeat.beat()
+        return {"ok": True}
 
     @app.get("/api/ping")
     def ping() -> dict[str, str]:
