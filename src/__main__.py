@@ -4,10 +4,13 @@
     python -m src
 """
 
+import json
 import logging
 import os
+import socket
 import sys
 import threading
+import urllib.request
 import webbrowser
 from pathlib import Path
 from typing import TextIO
@@ -25,6 +28,8 @@ logger = logging.getLogger(__name__)
 
 HOST = "127.0.0.1"
 PORT = 8765
+# 本程序的身份标识——`/api/ping` 返回它，单实例守卫据此认「8765 上是不是本程序」。
+APP_ID = "appraisal-report-system"
 # 运行期由 Python 写到 exe 旁边——中文名无妨（同 data/草稿/，UTF-16 写 NTFS 名字总对）；
 # 会被第三方解压软件搞乱码的只有随 zip 发出去的文件，这个不是。
 LOG_FILENAME = "运行日志.log"
@@ -89,16 +94,57 @@ def _load_dotenv() -> None:
     logger.info("已加载 .env：%s", env_file)
 
 
+def _port_free(host: str, port: int) -> bool:
+    """该端口现在能否绑定（没人在听）。仅用于给「被占用」一个清楚提示，不参与实际起服。"""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind((host, port))
+        return True
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+
+def _our_app_running(host: str, port: int, *, timeout: float = 1.5) -> bool:
+    """该端口上是否已是**本程序**在跑——探 `/api/ping` 认 `APP_ID` 标识。
+
+    探测失败（没人应答/不是本程序/超时/非 JSON）一律视作「没在跑」。
+    """
+    url = f"http://{host}:{port}/api/ping"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310  仅本机固定地址
+            if resp.status != 200:
+                return False
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception:  # noqa: BLE001  探测失败一律当作「没在跑」，绝不因探测异常拖垮启动
+        return False
+    return isinstance(data, dict) and data.get("app") == APP_ID
+
+
 def main() -> None:
     _setup_logging()
     _load_dotenv()
+    url = f"http://{HOST}:{PORT}/"
+
+    # 单实例守卫：本程序已在跑 → 直接打开浏览器复用，绝不启第二个撞端口（10048）。
+    # 客户是无窗口后台服务、「关网页≠关程序」，双击应永远只是「打开网页」。
+    if _our_app_running(HOST, PORT):
+        logger.info("本程序已在运行，直接打开浏览器：%s", url)
+        webbrowser.open(url)
+        return
+    # 端口被别的东西占（不是本程序）→ 别硬起 uvicorn 静默崩，给清楚提示并打开浏览器兜底。
+    if not _port_free(HOST, PORT):
+        logger.error("端口 %s 被占用且不是本程序。请重启电脑后重新打开本程序。", PORT)
+        webbrowser.open(url)
+        return
+
     # 首次运行（本地基础表为空）铺内置的 7 张默认基础表，离线开箱即用；本地非空则跳过，
     # 升级不覆盖估价师攒的版本。之后可在基础表页「从钉钉拉取」更新。
     seed_default_base_tables_if_empty(DEFAULT_STORE_DIR, bundled_dir("resources", "默认基础表"))
     # 同理铺内置的默认实例库（12 条起步实例）；本地已有则跳过、升级不覆盖。钉钉模式实例走多维表、
     # 本地这份不参与，播了也无妨。
     seed_default_instances_if_empty(DEFAULT_STORE_PATH, bundled_dir("resources", "默认实例库.json"))
-    url = f"http://{HOST}:{PORT}/"
     logger.info("启动 %s", url)
     threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     uvicorn.run(create_app(), host=HOST, port=PORT, log_level="warning")

@@ -59,6 +59,7 @@ from src.knowledge_base.active import ActiveVersions, active_fingerprint
 from src.knowledge_base.backend import LocalFileBaseTableBackend
 from src.knowledge_base.sync import pull as pull_base_tables
 from src.knowledge_base.sync import push_version as push_base_table
+from src.version import __version__
 from src.dingtalk.factory import notable_base_table_backend
 from src.ledger.model import BaseTableUse, Deviation, InstanceUse, LedgerEntry, MethodUse
 from src.ledger.model import to_dict as ledger_to_dict
@@ -543,7 +544,8 @@ def create_app() -> FastAPI:
     # 硬门禁（仅钉钉模式）：未登录/未授权者只能访问「首页壳 + 登录 + 状态查询」，其余数据接口 403。
     # 前端会据 /api/me 显示门禁遮罩；本中间件是服务端兜底，防绕过前端直连接口。本地单机模式不启用。
     _gate_exempt = frozenset({
-        "/", "/api/me", "/api/online", "/auth/login", "/auth/callback", "/auth/logout", "/favicon.ico",
+        "/", "/api/me", "/api/online", "/api/ping",
+        "/auth/login", "/auth/callback", "/auth/logout", "/favicon.ico",
     })
 
     @app.middleware("http")
@@ -562,6 +564,14 @@ def create_app() -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
         return HTMLResponse((_STATIC / "index.html").read_text(encoding="utf-8"))
+
+    @app.get("/api/ping")
+    def ping() -> dict[str, str]:
+        """单实例守卫探活：回本程序身份 + 版本，让再次双击的 exe 认出「我已在跑」而复用。
+
+        免登豁免（在 `_gate_exempt` 里），钉钉模式也可达——否则守卫探不到 gated 的在跑实例。
+        """
+        return {"app": "appraisal-report-system", "version": __version__}
 
     @app.get("/api/online")
     def online_status() -> dict[str, object]:
