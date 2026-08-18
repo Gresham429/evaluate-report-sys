@@ -150,6 +150,26 @@ def test_bus_lines_extracted_and_deduped_from_poi_names() -> None:
     assert facts["bus_stop_count"] == 2
 
 
+def test_bus_lines_from_address_field_skip_discontinued() -> None:
+    # 真机校准：线路号在 address、分号分隔；停运线整段带「(停运)」前缀，须整段跳过。
+    def transport(url: str) -> tuple[int, str]:
+        dec = urllib.parse.unquote(url)
+        if "regeo" in url:
+            return 200, _regeo("某地")
+        if "公交" in dec:
+            return 200, _around([
+                {"name": "火车南站西广场(公交站)", "distance": "150",
+                 "address": "(停运)8701路(通宵线);700路;707路;733路"},
+                {"name": "火车南站东(公交站)", "distance": "180",
+                 "address": "123路;736路(北线);736路B"},
+            ])
+        return 200, _around([])
+
+    facts = _client(transport).prefill_geo(120.0, 30.0)
+    assert facts["bus_lines"] == ["700路", "707路", "733路", "123路", "736路"]  # 8701路(停运)被跳
+    assert facts["bus_stop_count"] == 2
+
+
 def test_facilities_four_categories_are_independent() -> None:
     # 估价师反馈的根因：混搜时最近几条全是学校 → 只出学校。分类独立搜后各有其项。
     def transport(url: str) -> tuple[int, str]:

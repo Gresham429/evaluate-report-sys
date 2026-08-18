@@ -32,9 +32,11 @@ _REGEO_URL = "https://restapi.amap.com/v3/geocode/regeo"
 _AROUND_URL = "https://restapi.amap.com/v3/place/around"
 
 # 公交线路号：如「712路」「K5路」「B12路」。要求至少一位数字 + 「路」，避免把
-# 「商城北路」这类路名误当线路。⚠ 高德是否在公交站 POI 名/地址里带线路号须真机校准
-# （见 `_bus_facts`）；带不到就只出站点数、线路留现场补。
+# 「商城北路」这类路名误当线路。真机校准（2026-08-18 萧山）：线路号在公交站 POI 的
+# **`address` 字段**、分号分隔（见 `_bus_facts`）。
 _BUS_LINE_RE = re.compile(r"[A-Za-z]{0,2}\d+[A-Za-z]?路")
+# 一个点封顶收多少条线路，防某些枢纽站几十条线撑爆描述。
+_MAX_BUS_LINES = 20
 # 四至：把高德 regeo road 的 direction 归到东/南/西/北四个基本方位（复合方向如「东南」两边都算）。
 _CARDINALS = ("东", "南", "西", "北")
 
@@ -153,11 +155,12 @@ class AmapClient:
         return facts
 
     def _bus_facts(self, location: str) -> dict[str, Any]:
-        """200 米内公交：站名 + 站点数 + 线路号（从 POI 名/地址抽「N路」，去重保序）。
+        """200 米内公交：站名 + 站点数 + 线路号。
 
-        ⚠ 高德 Web 服务无「半径内公交线路」的直给接口。这里按 200 米内公交站 POI，
-        从其 `name`/`address` 正则抽线路号；**高德是否在名字里带线路号须用真 key 对已知
-        点（如萧山那份实勘）校准**——带不到则 `bus_lines` 为空，只出站点数、线路留现场补。
+        真机校准（2026-08-18 萧山）：高德公交站 POI 的**线路号在 `address` 字段**、分号分隔，
+        形如「700路;707路;733路;736路(北线);736路B」；**停运线整段带「(停运)」前缀**。故把
+        name+address 按分号切段、**跳过含「停运」的段**，再正则抽「N路」（去重、保序、封顶）。
+        半径固定 200（对齐因素「200米内公交线路数」）；该范围无站即 0 条，如实反映交通差。
         """
         pois = self._around_pois(location, "公交车站", "200")
         stops: list[str] = []
@@ -166,22 +169,25 @@ class AmapClient:
             name = str(poi.get("name") or "")
             if name and name not in stops:
                 stops.append(name)
-            text = f"{name} {poi.get('address') or ''}"
-            for token in _BUS_LINE_RE.findall(text):
-                if token not in lines:
-                    lines.append(token)
+            for segment in re.split(r"[;；]", f"{name} {poi.get('address') or ''}"):
+                if "停运" in segment:
+                    continue
+                for token in _BUS_LINE_RE.findall(segment):
+                    if token not in lines and len(lines) < _MAX_BUS_LINES:
+                        lines.append(token)
         return {"bus_stops": stops, "bus_stop_count": len(stops), "bus_lines": lines}
 
     def _facilities(self, location: str) -> dict[str, list[str]]:
         """公共服务设施：学校/医院/银行/商场**分类独立就近搜**（各取最多 4 条）。
 
         分开搜是为治「混搜按距离排序时，最近几条全是学校 → 只出学校」（估价师反馈的根因）。
+        商场关键字用「购物中心|商场|百货」——真机校准（萧山）单用「商场」常空，加百货/购物中心才命中。
         """
         return {
             "schools": self._around_names(location, "学校", "1000", 4),
             "hospitals": self._around_names(location, "医院", "1000", 4),
             "banks": self._around_names(location, "银行", "1000", 4),
-            "malls": self._around_names(location, "商场|购物中心", "1000", 4),
+            "malls": self._around_names(location, "购物中心|商场|百货", "1000", 4),
         }
 
     @staticmethod
