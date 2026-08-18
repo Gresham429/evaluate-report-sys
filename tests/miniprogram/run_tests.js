@@ -212,7 +212,7 @@ require(path.join(__dirname, '../../miniprogram/pages/index/index.js'));
 const indexCfg = lastCfg;
 require(path.join(__dirname, '../../miniprogram/pages/capture/capture.js'));
 const captureCfg = lastCfg;
-require(path.join(__dirname, '../../miniprogram/pages/factors/factors.js'));
+const factorsMod = require(path.join(__dirname, '../../miniprogram/pages/factors/factors.js'));
 const factorsCfg = lastCfg;
 const FACTORS = require(path.join(__dirname, '../../miniprogram/factors.js'));
 
@@ -479,6 +479,17 @@ async function main() {
   eq(facG.data.descs['停车便利度'], '周边约4个停车场，最近约120米', 'G4 停车便利度←地图停车场');
   eq(facG.data.descs['道路通达度'], '临近：商城北路、柳桥街', 'G4 道路通达度←就近道路');
   eq(facG.data.descs[f0.name], '距政府约4公里', 'G4 重要场所距离已手填，中心事实不覆盖');
+  // G4b 预填 warning（按实际数据条件触发，提醒估价师核对；铁律：只提示不阻断）
+  ok((facG.data.geo.warnings || []).length >= 1, 'G4b 预填带 warning 提醒核对');
+  const wc = factorsMod._geoWarnings;
+  const wComplete = wc({ bordering: { 东: 'a', 南: 'b', 西: 'c', 北: 'd' }, bus_lines: ['1路'],
+    bus_stop_count: 1, facilities: { schools: ['x'], hospitals: [], banks: [], malls: [] } });
+  ok(!wComplete.some((s) => s.indexOf('四至') >= 0), 'G4b 四至齐全不报四至 warning');
+  ok(wComplete.some((s) => s.indexOf('公交线路为接口') >= 0), 'G4b 有线路→提醒核对可能含停运');
+  const wSparse = wc({ bordering: { 东: 'a', 南: '', 西: '', 北: 'd' }, bus_lines: [],
+    bus_stop_count: 0, facilities: { schools: [], hospitals: [], banks: [], malls: [] } });
+  ok(wSparse.some((s) => s.indexOf('缺南、西向') >= 0), 'G4b 四至缺向→提示按宗地图补');
+  ok(wSparse.some((s) => s.indexOf('未搜到公交站') >= 0), 'G4b 200m无公交→提示现场确认');
   facG.onDone();
   await tick();
   const gDraft = await store.loadDraftLocal(lidG);

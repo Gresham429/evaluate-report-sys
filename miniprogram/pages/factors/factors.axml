@@ -14,6 +14,7 @@
     <view class="muted" a:if="{{geo.parkingText}}">停车场：{{geo.parkingText}}</view>
     <view class="muted" a:if="{{geo.roadsText}}">{{geo.roadsText}}</view>
     <view class="muted">周边：{{geo.facilities}}</view>
+    <view class="warn" style="color:#c0392b" a:for="{{geo.warnings}}" a:for-item="w" key="{{index}}">⚠ {{w}}</view>
   </view>
   <view class="muted">已自动填入对应区位因素的描述（只填空、可改）；档次仍由你判断。</view>
 </view>

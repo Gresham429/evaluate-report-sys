@@ -60,6 +60,29 @@ function _bordersText(f) {
   return s;
 }
 
+/** 预填数据的已知局限 → 提醒估价师核对（只提示不阻断，铁律 #7/#8：判断交给人）。按实际数据条件触发。 */
+function _geoWarnings(f) {
+  const w = [];
+  const bd = f.bordering || {};
+  const miss = ['东', '南', '西', '北'].filter((k) => !bd[k]);
+  if (miss.length) {
+    w.push('临街四至仅按就近道路推断，缺' + miss.join('、') + '向，请按宗地图核对补全（河流等接口取不到）。');
+  }
+  const lines = f.bus_lines || [];
+  if (!lines.length) {
+    w.push(f.bus_stop_count
+      ? '取到公交站但未识别到线路号，请现场核对公交线路。'
+      : '200米内未搜到公交站，请现场确认公交线路。');
+  } else {
+    w.push('公交线路为接口自动获取（可能含停运/临时线），请核对。');
+  }
+  const fac = f.facilities || {};
+  if ((fac.schools || []).length || (fac.malls || []).length) {
+    w.push('周边学校/商场为就近匹配，可能含培训机构或非目标类型，请核对。');
+  }
+  return w;
+}
+
 /** 高德 facts → 展示/预填用的文字字段。 */
 function _geoTexts(f) {
   const metro = f.nearest_metro, hw = f.highway, ctr = f.center, pk = f.parking;
@@ -130,6 +153,7 @@ Page({
         this.setData({ gps: { lat: loc.latitude, lng: loc.longitude } });
         broker.request('prefillGeo', { lng: loc.longitude, lat: loc.latitude }).then((f) => {
           const geo = _geoTexts(f);
+          geo.warnings = _geoWarnings(f);   // 已知局限提醒估价师核对（随 geo 落盘，重开仍在）
           this.setData({ geo });
           this._prefillFromGeo(geo);
           this._persist();
@@ -169,3 +193,8 @@ Page({
 
   onDone() { this._persist().then(() => dd.navigateBack()); },
 });
+
+// 便于 Node harness 直接单测纯函数；小程序运行时忽略页面文件的 module.exports。
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { _geoTexts, _geoWarnings, GEO_MAP };
+}
