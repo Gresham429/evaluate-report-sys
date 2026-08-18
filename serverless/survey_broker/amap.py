@@ -16,6 +16,7 @@
 
 import json
 import logging
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -29,6 +30,13 @@ __all__ = ["AmapClient", "AmapTransport"]
 
 _REGEO_URL = "https://restapi.amap.com/v3/geocode/regeo"
 _AROUND_URL = "https://restapi.amap.com/v3/place/around"
+
+# 公交线路号：如「712路」「K5路」「B12路」。要求至少一位数字 + 「路」，避免把
+# 「商城北路」这类路名误当线路。⚠ 高德是否在公交站 POI 名/地址里带线路号须真机校准
+# （见 `_bus_facts`）；带不到就只出站点数、线路留现场补。
+_BUS_LINE_RE = re.compile(r"[A-Za-z]{0,2}\d+[A-Za-z]?路")
+# 四至：把高德 regeo road 的 direction 归到东/南/西/北四个基本方位（复合方向如「东南」两边都算）。
+_CARDINALS = ("东", "南", "西", "北")
 
 # transport 契约：给定拼好 query 的完整 url → (http_status, response_text)
 AmapTransport = Callable[[str], tuple[int, str]]
@@ -51,12 +59,18 @@ def _make_urllib_transport(timeout: float) -> AmapTransport:
 
 def _empty_facts() -> dict[str, Any]:
     return {
-        "address": "", "bus_stops": [], "nearest_metro": None, "facilities": [],
+        "address": "",
+        "roads": [],       # 就近道路名——喂 道路通达度/临路状况/临街道路等级
+        "bordering": {c: "" for c in _CARDINALS},  # 四至：东/南/西/北 各就近道路（草稿，请核对）
+        "bus_stops": [],   # 200 米内公交站名
+        "bus_stop_count": 0,
+        "bus_lines": [],   # 200 米内公交线路号（如「712路」）——喂 200米内公交线路数
+        "nearest_metro": None,
+        "facilities": {"schools": [], "hospitals": [], "banks": [], "malls": []},  # 公共服务设施四类
         "center": None,    # 最近市/区政府·管委会 {name, distance_m}——喂 重要场所/离城中心距离
         "highway": None,   # 最近高速收费站 {name, distance_m}——喂 离高速口距离
         "parking": None,   # 周边停车场 {count, nearest_m}——喂 附近停车场数量/停车便利度
         "water": None,     # 最近水库 {name, distance_m}——喂 离水源地距离（农用）
-        "roads": [],       # 就近道路名——喂 道路通达度/临路状况/临街道路等级
     }
 
 
@@ -112,28 +126,87 @@ class AmapClient:
         """逆地理 + 定向周边 → 事实字典，任何一路失败都给该路空值。只有事实、无档次判断（#7）。
 
         Returns:
-            `{address, bus_stops:[名], nearest_metro:{name,distance_m}|None, facilities:[名],
-              center/highway/water:{name,distance_m}|None, parking:{count,nearest_m}|None,
-              roads:[路名]}`。
+            `{address, roads:[路名], bordering:{东南西北→路名},
+              bus_stops:[站名], bus_stop_count:int, bus_lines:[线路号],
+              nearest_metro:{name,distance_m}|None,
+              facilities:{schools/hospitals/banks/malls:[名]},
+              center/highway/water:{name,distance_m}|None, parking:{count,nearest_m}|None}`。
         """
         location = f"{lng},{lat}"
         facts = _empty_facts()
 
         regeo = self._get(_REGEO_URL, {"location": location, "extensions": "all"})
         if regeo is not None:
-            # 待真机校准：regeocode.formatted_address / regeocode.roads[].name（已真机确认可用）
+            # 待真机校准：regeocode.formatted_address / roads[].name（已真机确认）；roads[].direction 供四至
             regeocode = regeo.get("regeocode") or {}
             facts["address"] = str(regeocode.get("formatted_address") or "")
             facts["roads"] = self._road_names(regeocode)
+            facts["bordering"] = self._bordering(regeocode)
 
-        facts["bus_stops"] = self._around_names(location, "公交车站", "1000", 8)
+        facts.update(self._bus_facts(location))
         facts["nearest_metro"] = self._nearest(location, "地铁站", "2000")
-        facts["facilities"] = self._around_names(location, "学校|医院|幼儿园", "1500", 6)
+        facts["facilities"] = self._facilities(location)
         facts["center"] = self._nearest(location, "市政府|区政府|管委会", "5000")
         facts["highway"] = self._nearest(location, "收费站", "15000")
         facts["parking"] = self._parking(location, "停车场", "2000")
         facts["water"] = self._nearest(location, "水库", "8000")
         return facts
+
+    def _bus_facts(self, location: str) -> dict[str, Any]:
+        """200 米内公交：站名 + 站点数 + 线路号（从 POI 名/地址抽「N路」，去重保序）。
+
+        ⚠ 高德 Web 服务无「半径内公交线路」的直给接口。这里按 200 米内公交站 POI，
+        从其 `name`/`address` 正则抽线路号；**高德是否在名字里带线路号须用真 key 对已知
+        点（如萧山那份实勘）校准**——带不到则 `bus_lines` 为空，只出站点数、线路留现场补。
+        """
+        pois = self._around_pois(location, "公交车站", "200")
+        stops: list[str] = []
+        lines: list[str] = []
+        for poi in pois:
+            name = str(poi.get("name") or "")
+            if name and name not in stops:
+                stops.append(name)
+            text = f"{name} {poi.get('address') or ''}"
+            for token in _BUS_LINE_RE.findall(text):
+                if token not in lines:
+                    lines.append(token)
+        return {"bus_stops": stops, "bus_stop_count": len(stops), "bus_lines": lines}
+
+    def _facilities(self, location: str) -> dict[str, list[str]]:
+        """公共服务设施：学校/医院/银行/商场**分类独立就近搜**（各取最多 4 条）。
+
+        分开搜是为治「混搜按距离排序时，最近几条全是学校 → 只出学校」（估价师反馈的根因）。
+        """
+        return {
+            "schools": self._around_names(location, "学校", "1000", 4),
+            "hospitals": self._around_names(location, "医院", "1000", 4),
+            "banks": self._around_names(location, "银行", "1000", 4),
+            "malls": self._around_names(location, "商场|购物中心", "1000", 4),
+        }
+
+    @staticmethod
+    def _bordering(regeocode: dict[str, Any]) -> dict[str, str]:
+        """四至：regeo roads 的 direction 归到东/南/西/北，每方位取**最近**一条道路。
+
+        只是「就近方向道路」的草稿，**给不了宗地法定四至、也不含河流**（如「北至北塘河」），
+        估价师须按宗地图核对补全（铁律：保留事实、判断交给人）。
+        """
+        best: dict[str, tuple[float, str]] = {}
+        for road in regeocode.get("roads") or []:
+            if not isinstance(road, dict):
+                continue
+            name = str(road.get("name") or "")
+            direction = str(road.get("direction") or "")
+            if not name:
+                continue
+            try:
+                dist = float(road.get("distance") or 0)
+            except (TypeError, ValueError):
+                dist = 0.0
+            for card in _CARDINALS:
+                if card in direction and (card not in best or dist < best[card][0]):
+                    best[card] = (dist, name)
+        return {card: best[card][1] if card in best else "" for card in _CARDINALS}
 
     def _around_pois(self, location: str, keywords: str, radius: str) -> list[dict[str, Any]]:
         """按关键字周边检索（按距离排序）。调用前节流；任何失败回空列表。"""

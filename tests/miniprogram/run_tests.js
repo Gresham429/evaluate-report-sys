@@ -111,13 +111,19 @@ function makeServer() {
         updated_at: d.updated_at || '', owners: d.owners || [] };
     }
     if (a === 'prefillGeo') return {
-      address: '杭州市西湖区某路', bus_stops: ['A站', 'B站'],
-      facilities: ['学校', '医院'], nearest_metro: { name: '龙翔桥', distance_m: 300 },
+      address: '杭州市萧山区某路',
+      roads: ['商城北路', '柳桥街'],
+      bordering: { 东: '市心路', 南: '金城路', 西: '金惠路', 北: '北塘河' },
+      bus_stops: ['商城北路口', '柳桥街站'], bus_stop_count: 2, bus_lines: ['712路', '723路', '733路'],
+      nearest_metro: { name: '龙翔桥', distance_m: 300 },
+      facilities: {
+        schools: ['回澜初中', '育才小学'], hospitals: ['社区卫生院', '萧山医院'],
+        banks: ['中国工商银行', '萧山农商银行'], malls: ['杭州胤隆汇休闲主题酒店', '杭州金马饭店'],
+      },
       center: { name: '西湖区政府', distance_m: 3500 },
       highway: { name: '留下收费站', distance_m: 2100 },
       parking: { count: 4, nearest_m: 120 },
       water: { name: '西溪湿地', distance_m: 800 },
-      roads: ['文一路', '古墩路'],
     };
     if (a === 'whoami') return { userid: 'u1', name: '薛焱' };
     return {};
@@ -463,10 +469,15 @@ async function main() {
   await tick();
   eq(facG.data.geo.metroText, '龙翔桥 约300米', 'G4 地图取到地铁事实');
   eq(facG.data.descs['离地铁距离'], '手填：紧邻2号线', 'G4 已手填的匹配因素不被地图覆盖');
-  eq(facG.data.descs['200米内公交线路数'], 'A站、B站', 'G4 空的公交因素被地图填入');
-  eq(facG.data.descs['公共服务设施'], '学校、医院', 'G4 空的公共服务设施被地图填入');
+  eq(facG.data.descs['200米内公交线路数'], '712、723、733路公交车', 'G4 公交因素填入线路号（非站点）');
+  eq(facG.data.descs['公共服务设施'],
+    '附近学校有回澜初中、育才小学；医院有社区卫生院、萧山医院；银行有中国工商银行、萧山农商银行；商场有杭州胤隆汇休闲主题酒店、杭州金马饭店。',
+    'G4 公共服务设施填入学校/医院/银行/商场四类');
+  eq(facG.data.descs['临街状况'],
+    '估价对象所在宗地东至市心路，南至金城路，西至金惠路，北至北塘河。估价对象临商城北路、柳桥街。',
+    'G4 临街状况填入四至 + 临街');
   eq(facG.data.descs['停车便利度'], '周边约4个停车场，最近约120米', 'G4 停车便利度←地图停车场');
-  eq(facG.data.descs['道路通达度'], '临近：文一路、古墩路', 'G4 道路通达度←就近道路');
+  eq(facG.data.descs['道路通达度'], '临近：商城北路、柳桥街', 'G4 道路通达度←就近道路');
   eq(facG.data.descs[f0.name], '距政府约4公里', 'G4 重要场所距离已手填，中心事实不覆盖');
   facG.onDone();
   await tick();
@@ -482,7 +493,9 @@ async function main() {
     .find((x) => x.status === '已提交');
   eq(gSub.content.subject_levels[f0.name], f0.levels[0], 'G3 提交后服务端 subject_levels 含档次');
   eq(gSub.content.asset_conditions[f0.name], '距政府约4公里', 'G3 提交后服务端 asset_conditions 含描述');
-  eq(gSub.content.asset_conditions['公共服务设施'], '学校、医院', 'G3 地图预填的描述随提交进服务端');
+  eq(gSub.content.asset_conditions['公共服务设施'],
+    '附近学校有回澜初中、育才小学；医院有社区卫生院、萧山医院；银行有中国工商银行、萧山农商银行；商场有杭州胤隆汇休闲主题酒店、杭州金马饭店。',
+    'G3 地图预填的描述随提交进服务端');
 
   // ===== H. 入口页：未提交可删 + 已提交按类别分组不可删 =====
   console.log('H. 删除草稿 + 已提交分类展示');

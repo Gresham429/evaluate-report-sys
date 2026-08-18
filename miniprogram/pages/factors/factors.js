@@ -4,15 +4,18 @@ const FACTORS = require('../../factors');
 
 // 地图地理事实 → 区位因素描述的关键字映射（只把事实填进对应因素的「描述」，
 // 档次仍由估价师手选下拉，铁律 #7）。顺序＝匹配优先级（具体在前）。
+// 「临街道路」须排在「临街」前：临街道路等级取道路名，临街状况取四至。
 const GEO_MAP = [
   { kw: '地铁', pick: (geo) => geo.metroText },
-  { kw: '公交', pick: (geo) => geo.bus_stops },
+  { kw: '公交', pick: (geo) => geo.busText },
   { kw: '公共服务设施', pick: (geo) => geo.facilities },
   { kw: '高速', pick: (geo) => geo.highwayText },
   { kw: '城中心', pick: (geo) => geo.centerText },
   { kw: '重要场所', pick: (geo) => geo.centerText },
   { kw: '水源', pick: (geo) => geo.waterText },
   { kw: '停车', pick: (geo) => geo.parkingText },
+  { kw: '临街道路', pick: (geo) => geo.roadsText },   // 临街道路等级 → 就近道路名
+  { kw: '临街', pick: (geo) => geo.bordersText },      // 临街状况 → 四至 + 临街
   { kw: '道路', pick: (geo) => geo.roadsText },
   { kw: '临路', pick: (geo) => geo.roadsText },
 ];
@@ -23,13 +26,49 @@ function _dist(m) {
   return n >= 1000 ? ('约' + (Math.round(n / 100) / 10) + '公里') : ('约' + Math.round(n) + '米');
 }
 
+/** 200 米内公交 → 「712、723、733路公交车」；无线路则退回站点数（线路现场补）。 */
+function _busText(f) {
+  const lines = f.bus_lines || [];
+  if (lines.length) {
+    return lines.map((s) => String(s).replace(/路$/, '')).join('、') + '路公交车';
+  }
+  if (f.bus_stop_count) return '附近有公交站' + f.bus_stop_count + '处（线路请现场核对）';
+  return '（无）';
+}
+
+/** 公共服务设施 → 「附近学校有…；医院有…；银行有…；商场有…。」（只列非空类别）。 */
+function _facilitiesText(fac) {
+  const groups = [['schools', '学校'], ['hospitals', '医院'], ['banks', '银行'], ['malls', '商场']];
+  const parts = [];
+  groups.forEach((g) => {
+    const items = (fac && fac[g[0]]) || [];
+    if (items.length) parts.push(g[1] + '有' + items.join('、'));
+  });
+  return parts.length ? ('附近' + parts.join('；') + '。') : '';
+}
+
+/** 临街状况 → 「估价对象所在宗地东至…南至…西至…北至…。估价对象临A、B。」（草稿，请核对）。 */
+function _bordersText(f) {
+  const bd = f.bordering || {};
+  const dirs = [['东', '东至'], ['南', '南至'], ['西', '西至'], ['北', '北至']];
+  const parts = [];
+  dirs.forEach((d) => { if (bd[d[0]]) parts.push(d[1] + bd[d[0]]); });
+  let s = '';
+  if (parts.length) s += '估价对象所在宗地' + parts.join('，') + '。';
+  const roads = f.roads || [];
+  if (roads.length) s += '估价对象临' + roads.slice(0, 2).join('、') + '。';
+  return s;
+}
+
 /** 高德 facts → 展示/预填用的文字字段。 */
 function _geoTexts(f) {
   const metro = f.nearest_metro, hw = f.highway, ctr = f.center, pk = f.parking;
   return {
     address: f.address,
-    bus_stops: (f.bus_stops || []).join('、') || '（无）',
-    facilities: (f.facilities || []).slice(0, 6).join('、'),
+    bus_stops: (f.bus_stops || []).join('、') || '（无）',   // 展示：站名
+    busText: _busText(f),                                    // 预填：线路号
+    facilities: _facilitiesText(f.facilities),               // 展示 & 预填：四类
+    bordersText: _bordersText(f),                            // 预填：临街四至
     metroText: metro ? (metro.name + ' ' + _dist(metro.distance_m)) : '（无）',
     highwayText: hw ? (hw.name + ' ' + _dist(hw.distance_m)) : '',
     centerText: ctr ? (ctr.name + ' ' + _dist(ctr.distance_m)) : '',
