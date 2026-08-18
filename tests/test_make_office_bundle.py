@@ -140,6 +140,30 @@ def test_make_bundle_output_name_is_ascii(tmp_path: Path) -> None:
     assert bundle.suffix == ".zip"
 
 
+def _wrap_as_github_artifact(delivery_zip: Path, tmp_path: Path) -> Path:
+    """GitHub 下载 artifact 得到的是「容器 zip 里套着交付 zip」——照此包一层。"""
+    container = tmp_path / "appraisal-report-system-windows-artifact.zip"
+    with zipfile.ZipFile(container, "w") as zf:
+        zf.write(delivery_zip, delivery_zip.name)
+    return container
+
+
+def test_make_bundle_accepts_github_artifact_container(tmp_path: Path) -> None:
+    # 用户从 Actions 页下的就是容器 zip；工具应自动拆壳，省得用户先手动解压一层。
+    delivery = _make_delivery_zip(tmp_path)
+    container = _wrap_as_github_artifact(delivery, tmp_path)
+    env_file = tmp_path / "filled.env"
+    env_file.write_text(FILLED_ENV, encoding="utf-8")
+
+    bundle = make_bundle(container, env_file, tmp_path / "out")
+
+    with zipfile.ZipFile(bundle) as zf:
+        names = set(zf.namelist())
+        assert f"{_APP_DIR}/.env" in names
+        assert zf.read(f"{_APP_DIR}/.env").decode("utf-8") == FILLED_ENV
+        assert f"{_APP_DIR}/{_APP_DIR}.exe" in names
+
+
 def test_make_bundle_raises_on_invalid_env(tmp_path: Path) -> None:
     delivery = _make_delivery_zip(tmp_path)
     env_file = tmp_path / "bad.env"

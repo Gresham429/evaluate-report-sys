@@ -128,11 +128,13 @@ def audit_office_env(text: str) -> EnvAudit:
     return EnvAudit(values=values, errors=errors, warnings=warnings)
 
 
-def _find_app_dir(extract_root: Path) -> Path:
+def _resolve_app_dir(extract_root: Path, _depth: int = 0) -> Path:
     """在解压根里定位应用目录（含 exe 的那层）。
 
     真交付 zip 顶层是单个 `appraisal-report-system/`。优先按名找，找不到再退回
-    「唯一的顶层目录」；都不成立就报错——宁可炸也不猜错、往错地方塞 .env。
+    「唯一的顶层目录」。**GitHub 下 artifact 得到的是「容器 zip 套交付 zip」**——
+    此时顶层只有一个 `.zip`、没有目录，就拆开这层壳再找（省得用户先手动解压一层）。
+    都不成立就报错——宁可炸也不猜错、往错地方塞 .env。
     """
     named = extract_root / _APP_DIR
     if named.is_dir():
@@ -140,6 +142,15 @@ def _find_app_dir(extract_root: Path) -> Path:
     subdirs = [p for p in extract_root.iterdir() if p.is_dir()]
     if len(subdirs) == 1:
         return subdirs[0]
+
+    zips = [p for p in extract_root.iterdir() if p.is_file() and p.suffix == ".zip"]
+    if _depth < 2 and not subdirs and len(zips) == 1:
+        inner = extract_root / "_inner"
+        inner.mkdir()
+        with zipfile.ZipFile(zips[0]) as zf:
+            zf.extractall(inner)
+        return _resolve_app_dir(inner, _depth + 1)
+
     raise ValueError(
         f"认不出交付 zip 的应用目录（顶层子目录={[p.name for p in subdirs]}）；"
         f"期望单个 {_APP_DIR}/。"
@@ -179,7 +190,7 @@ def make_bundle(
         extract_root = Path(td)
         with zipfile.ZipFile(delivery_zip) as zf:
             zf.extractall(extract_root)
-        app_dir = _find_app_dir(extract_root)
+        app_dir = _resolve_app_dir(extract_root)
 
         (app_dir / ".env").write_text(env_text, encoding="utf-8")
 
@@ -189,8 +200,10 @@ def make_bundle(
                     "⚠ §坑7：整包里有中文名文件 %s，国产解压软件可能解成乱码。", f.name
                 )
 
+        # root_dir 用 app_dir.parent（而非 extract_root）：容器拆壳后 app_dir 在 _inner/ 里，
+        # 用 parent 才能让 base_dir=app_dir.name 对得上，顶层条目恒为 appraisal-report-system/。
         bundle = Path(
-            shutil.make_archive(str(out_dir / _OUT_STEM), "zip", extract_root, app_dir.name)
+            shutil.make_archive(str(out_dir / _OUT_STEM), "zip", app_dir.parent, app_dir.name)
         )
     logger.info("已产出整包 %s（%.2f MB）", bundle, bundle.stat().st_size / 1024 / 1024)
     return bundle
