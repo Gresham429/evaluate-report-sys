@@ -1005,22 +1005,32 @@ def create_app() -> FastAPI:
 
         userid 与问卷「填报人」同源（免登 userid），故必须走 unionId→userid 那步。
         """
+        # 逐步日志：这套 OAuth 只能真机扫码测；失败时靠 运行日志.log 精确定位卡在哪步、钉钉报什么错。
+        logger.info("登录回调：进入，authCode有=%s state有=%s", bool(authCode or code), bool(state))
         if not session.consume_login_state(state):
+            logger.error("登录回调失败：state 校验不符（或已消费/服务中途重启丢了 state）")
             raise HTTPException(status_code=400, detail="登录态校验失败（state 不符），请重新登录")
         auth_code = authCode or code
         if not auth_code:
+            logger.error("登录回调失败：回调缺 authCode")
             raise HTTPException(status_code=400, detail="回调缺 authCode")
         oauth = config.build_oauth()
         client = config.build_client()
         if oauth is None or client is None:
+            logger.error("登录回调失败：缺应用凭据 oauth=%s client=%s", oauth is not None, client is not None)
             raise HTTPException(status_code=409, detail="未配应用凭据，无法登录")
         try:
             user_token = oauth.exchange(auth_code)
+            logger.info("登录回调：① exchange 换 userAccessToken 成功")
             info = oauth.me(user_token)
+            logger.info("登录回调：② me 取用户信息成功 unionId=%s name=%s", info.get("unionid"), info.get("name"))
             userid = oauth.userid_by_union(client.access_token(), info["unionid"])
+            logger.info("登录回调：③ unionId 换 userid 成功 userid=%s", userid)
         except (ValueError, RuntimeError) as exc:
+            logger.error("登录回调失败（换 token/取用户信息/换 userid 某步）：%s", exc)
             raise HTTPException(status_code=400, detail=f"登录失败：{exc}") from exc
         session.set_operator(userid, info.get("name", ""))
+        logger.info("登录回调：④ 已记会话 operator=%s，跳回首页", userid)
         return RedirectResponse("/")
 
     @app.get("/auth/logout")
