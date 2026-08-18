@@ -68,6 +68,12 @@
   .loginbox { font-size: .78rem; color: var(--ink-3); white-space: nowrap; margin-bottom: .25rem; }
   .loginbox a { color: var(--seal); text-decoration: none; }
   .loginbox a:hover { text-decoration: underline; }
+  .auth-gate { position: fixed; inset: 0; z-index: 9999; background: var(--paper, #f7f4ee);
+    display: flex; align-items: center; justify-content: center; }
+  .auth-card { max-width: 30rem; text-align: center; padding: 2rem; }
+  .auth-card .btn-login { display: inline-block; padding: .6rem 1.6rem; border-radius: 8px;
+    background: var(--seal, #8a1c1c); color: #fff; text-decoration: none; font-size: .95rem; }
+  .auth-card .btn-login:hover { opacity: .9; }
   .rule-double { border-top: 2px solid var(--ink); margin-bottom: 2px; }
   .rule-double + .rule-thin { border-top: 1px solid var(--ink); }
 
@@ -295,6 +301,16 @@
   .status.done { color: var(--jade); }
   .ver { font-family: var(--num); font-size: .76rem; color: var(--ink-2); }
 </style>
+
+<!-- 硬门禁遮罩：钉钉模式下未登录/未授权时全屏挡住，挡掉整个应用 -->
+<div id="authGate" class="auth-gate" hidden>
+  <div class="auth-card">
+    <div class="seal" style="width:56px;height:56px;line-height:56px;margin:0 auto 16px">评</div>
+    <h2 id="authGateTitle" style="margin:0 0 8px">请先登录</h2>
+    <p id="authGateMsg" class="muted" style="margin:0 0 4px"></p>
+    <div id="authGateActions" style="margin-top:18px"></div>
+  </div>
+</div>
 
 <div class="sheet">
   <header class="masthead">
@@ -2292,6 +2308,7 @@ loadLoginBox();
 async function loadLoginBox() {
   let me;
   try { me = await (await fetch('/api/me')).json(); } catch (e) { return; }
+  applyAuthGate(me);
   const box = $('loginBox');
   if (!box) return;
   if (me.logged_in) {
@@ -2301,6 +2318,27 @@ async function loadLoginBox() {
     const who = me.operator
       ? `（当前 ${esc(me.operator)}${me.is_admin ? '·管理员' : ''}，来自 .env）` : '';
     box.innerHTML = `<a href="/auth/login">钉钉登录</a> ${who}`;
+  }
+}
+
+// 硬门禁：钉钉模式下，未登录/未授权者被全屏遮罩挡住，见不到应用。
+function applyAuthGate(me) {
+  const gate = $('authGate');
+  if (!gate) return;
+  if (me.gated && !me.authorized) {
+    if (me.logged_in) {
+      $('authGateTitle').textContent = '无使用权限';
+      $('authGateMsg').textContent =
+        `您（${me.operator_name || me.operator}）暂无使用本软件的权限，请联系管理员开通后再用。`;
+      $('authGateActions').innerHTML = '<a class="btn-login" href="/auth/logout">退出登录</a>';
+    } else {
+      $('authGateTitle').textContent = '请先登录';
+      $('authGateMsg').textContent = '本软件需钉钉扫码登录、且经管理员授权后方可使用。';
+      $('authGateActions').innerHTML = '<a class="btn-login" href="/auth/login">钉钉扫码登录</a>';
+    }
+    gate.hidden = false;
+  } else {
+    gate.hidden = true;
   }
 }
 </script>

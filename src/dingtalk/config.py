@@ -18,6 +18,7 @@ __all__ = [
     "login_redirect_uri",
     "office_operator",
     "office_admins",
+    "office_allowed_users",
     "ledger_sheet",
     "instance_sheet",
     "base_table_sheet",
@@ -96,6 +97,17 @@ def office_operator() -> str:
     未设时返回空串 → `current_operator()` 走 fail-closed（认不出人就什么都看不到）。
     """
     return os.environ.get("OFFICE_OPERATOR_ID", "").strip()
+
+
+def office_allowed_users() -> frozenset[str]:
+    """允许使用办公端的 userid 名单（OFFICE_ALLOWED_USERS，逗号/空格分隔）——硬门禁用。
+
+    **空=不额外限制**：任何已登录（在钉钉应用可见范围内）的用户都能用——靠钉钉应用授权范围兜底。
+    **非空=白名单**：只有名单内 userid（+ 管理员）能用本软件，其余登录后也被挡在门外。
+    与问卷「填报人」同源（钉钉免登 userid）。判定见 `session.is_authorized`。
+    """
+    raw = os.environ.get("OFFICE_ALLOWED_USERS", "")
+    return frozenset(raw.replace(",", " ").split())
 
 
 def office_admins() -> frozenset[str]:

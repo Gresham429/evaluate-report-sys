@@ -59,6 +59,9 @@ def client(monkeypatch: pytest.MonkeyPatch, notable_client: FakeNotable) -> Test
     # 台账 Store 也要走这个假 client：工厂按同样的 config 选后端
     monkeypatch.setattr(config, "instance_sheet", lambda: "")
     monkeypatch.setattr(config, "base_table_sheet", lambda: "")
+    # 钉钉模式有硬门禁：给个授权操作人过门禁，好测领号/渲染本身（非测门禁）。
+    monkeypatch.setattr(config, "office_operator", lambda: "tester")
+    monkeypatch.setattr(config, "office_allowed_users", lambda: frozenset())
     return TestClient(create_app())
 
 
@@ -94,6 +97,8 @@ def test_notable_without_credentials_returns_503(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(config, "use_notable", lambda: True)
     monkeypatch.setattr(config, "ledger_sheet", lambda: "台账表")
     monkeypatch.setattr(config, "build_client", lambda *, timeout=30.0: None)
+    monkeypatch.setattr(config, "office_operator", lambda: "tester")  # 过硬门禁
+    monkeypatch.setattr(config, "office_allowed_users", lambda: frozenset())
     c = TestClient(create_app())
     resp = c.post("/api/render", data={"project": _project_payload()})
     assert resp.status_code == 503

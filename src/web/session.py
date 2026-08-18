@@ -26,6 +26,7 @@ __all__ = [
     "consume_login_state",
     "current_operator",
     "is_admin",
+    "is_authorized",
     "is_logged_in",
     "operator_name",
     "set_operator",
@@ -88,6 +89,20 @@ def is_admin() -> bool:
     """当前操作人是否管理员（在 OFFICE_ADMINS 名单里）——管理员办公端可看全部问卷。"""
     op = current_operator()
     return bool(op) and op in config.office_admins()
+
+
+def is_authorized() -> bool:
+    """当前用户是否被许可使用办公端（硬门禁用）。
+
+    = 有身份（`current_operator()` 非空——生产配置不设 `OFFICE_OPERATOR_ID`，故等于**必须登录**）
+      且（`OFFICE_ALLOWED_USERS` 为空 → 放行任何已识别者；或 operator 在名单内；或是管理员）。
+    认不出人（operator=""）一律 False（fail-closed）。仅在钉钉模式下由中间件/前端据此挡人。
+    """
+    op = current_operator()
+    if not op:
+        return False
+    allowed = config.office_allowed_users()
+    return not allowed or op in allowed or is_admin()
 
 
 def viewer() -> Viewer:

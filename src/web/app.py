@@ -23,8 +23,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from starlette.background import BackgroundTask
 
 from src.dingtalk import config
@@ -540,6 +540,25 @@ def create_app() -> FastAPI:
     """构建 FastAPI 应用。"""
     app = FastAPI(title="房地产估价报告生成系统", docs_url=None, redoc_url=None)
 
+    # 硬门禁（仅钉钉模式）：未登录/未授权者只能访问「首页壳 + 登录 + 状态查询」，其余数据接口 403。
+    # 前端会据 /api/me 显示门禁遮罩；本中间件是服务端兜底，防绕过前端直连接口。本地单机模式不启用。
+    _gate_exempt = frozenset({
+        "/", "/api/me", "/api/online", "/auth/login", "/auth/callback", "/auth/logout", "/favicon.ico",
+    })
+
+    @app.middleware("http")
+    async def _authorization_gate(request: Request, call_next):  # type: ignore[no-untyped-def]
+        if (
+            config.use_notable()
+            and request.url.path not in _gate_exempt
+            and not session.is_authorized()
+        ):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "请先扫码登录，且需被授权方可使用本软件"},
+            )
+        return await call_next(request)
+
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
         return HTMLResponse((_STATIC / "index.html").read_text(encoding="utf-8"))
@@ -939,6 +958,9 @@ def create_app() -> FastAPI:
             "operator_name": session.operator_name(),
             "logged_in": session.is_logged_in(),
             "is_admin": session.is_admin(),
+            # 硬门禁：gated=是否启用（钉钉模式才启用）；authorized=当前用户是否被许可使用本软件。
+            "gated": config.use_notable(),
+            "authorized": session.is_authorized(),
         }
 
     # ── 钉钉扫码登录（纯本机 OAuth2；见 spec 2026-08-13-办公端钉钉扫码登录）──
