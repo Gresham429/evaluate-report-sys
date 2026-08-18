@@ -43,6 +43,9 @@ ARCHIVE_STEM = "appraisal-report-system-windows"
 # 交付给甲方的是 docx（正式、Word 可直接打开/打印）；由 tools/build_manual_docx.py 生成。
 # docs/使用说明.md 仍留作仓库内可读源，不进交付包。
 _PAYLOAD_DOC = ROOT / "docs" / "使用说明.docx"
+# 联钉钉部署配置模板（非敏感、可随包发）：目标机器把它复制成 .env、填真实值放 exe 旁即联多维表。
+# 真实 .env（含 app secret）由公司内部分发，不进本包、不进 Release。
+_PAYLOAD_ENV_TEMPLATE = ROOT / ".env.example"
 
 
 def _build() -> int:
@@ -106,6 +109,8 @@ def _stage() -> Path:
     shutil.copy2(ROOT / "copy.yaml", staging / "copy.yaml")
     if _PAYLOAD_DOC.exists():
         shutil.copy2(_PAYLOAD_DOC, staging / "使用说明.docx")
+    if _PAYLOAD_ENV_TEMPLATE.exists():
+        shutil.copy2(_PAYLOAD_ENV_TEMPLATE, staging / ".env.example")
     return staging
 
 
