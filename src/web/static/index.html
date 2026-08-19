@@ -68,6 +68,9 @@
   .loginbox { font-size: .78rem; color: var(--ink-3); white-space: nowrap; margin-bottom: .25rem; }
   .loginbox a { color: var(--seal); text-decoration: none; }
   .loginbox a:hover { text-decoration: underline; }
+  /* hidden 属性必须真正生效：否则 .auth-gate 的 display:flex（author 规则）会压过
+     浏览器默认的 [hidden]{display:none}，门禁 gate.hidden=true 也藏不住 → 卡「请先登录」。 */
+  [hidden] { display: none !important; }
   .auth-gate { position: fixed; inset: 0; z-index: 9999; background: var(--paper, #f7f4ee);
     display: flex; align-items: center; justify-content: center; }
   .auth-card { max-width: 30rem; text-align: center; padding: 2rem; }
@@ -308,7 +311,8 @@
     <div class="seal" style="width:56px;height:56px;line-height:56px;margin:0 auto 16px">评</div>
     <h2 id="authGateTitle" style="margin:0 0 8px">请先登录</h2>
     <p id="authGateMsg" class="muted" style="margin:0 0 4px"></p>
-    <div id="authGateActions" style="margin-top:18px"></div>
+    <!-- 静态兜底登录按钮：即便 JS（fetch）在老浏览器没跑起来，也有一个可点的登录入口 -->
+    <div id="authGateActions" style="margin-top:18px"><a class="btn-login" href="/auth/login">钉钉扫码登录</a></div>
   </div>
 </div>
 

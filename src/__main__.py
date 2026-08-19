@@ -162,6 +162,22 @@ def _start_shutdown_watchdog(
     threading.Thread(target=_watch, daemon=True).start()
 
 
+def _open_browser(url: str) -> None:
+    """打开浏览器看应用。Windows 上**强制用 Edge**（Win10/11 必装、Chromium 内核）。
+
+    本应用用了 fetch/现代 JS，老国产浏览器（IE 内核）会白屏、卡在门禁「请先登录」、
+    按钮点不出——用 Edge 从根上规避。Edge 打不开（极少）则回退系统默认浏览器。
+    """
+    startfile = getattr(os, "startfile", None)
+    if sys.platform == "win32" and startfile is not None:
+        try:
+            startfile(f"microsoft-edge:{url}")   # microsoft-edge: 协议由 Edge 注册，Win10/11 稳定可用
+            return
+        except OSError:
+            logger.warning("用 Edge 打开失败，回退系统默认浏览器", exc_info=True)
+    webbrowser.open(url)
+
+
 def main() -> None:
     _setup_logging()
     _load_dotenv()
@@ -171,12 +187,12 @@ def main() -> None:
     # 客户是无窗口后台服务、「关网页≠关程序」，双击应永远只是「打开网页」。
     if _our_app_running(HOST, PORT):
         logger.info("本程序已在运行，直接打开浏览器：%s", url)
-        webbrowser.open(url)
+        _open_browser(url)
         return
     # 端口被别的东西占（不是本程序）→ 别硬起 uvicorn 静默崩，给清楚提示并打开浏览器兜底。
     if not _port_free(HOST, PORT):
         logger.error("端口 %s 被占用且不是本程序。请重启电脑后重新打开本程序。", PORT)
-        webbrowser.open(url)
+        _open_browser(url)
         return
 
     restore_login()   # 恢复上次登录：服务自停重启/重开后仍保持登录，免每次重扫
@@ -188,7 +204,7 @@ def main() -> None:
     # 本地这份不参与，播了也无妨。
     seed_default_instances_if_empty(DEFAULT_STORE_PATH, bundled_dir("resources", "默认实例库.json"))
     logger.info("启动 %s", url)
-    threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    threading.Timer(1.0, lambda: _open_browser(url)).start()
     app = create_app()
     server = uvicorn.Server(uvicorn.Config(app, host=HOST, port=PORT, log_level="warning"))
     _start_shutdown_watchdog(server, app.state.heartbeat)   # 关网页无心跳 → 优雅停服退出
