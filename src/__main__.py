@@ -25,6 +25,7 @@ from src.library.store import DEFAULT_STORE_PATH
 from src.paths import app_dir, bundled_dir
 from src.web.app import create_app
 from src.web.heartbeat import Heartbeat
+from src.web.session import restore_login
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +178,8 @@ def main() -> None:
         logger.error("端口 %s 被占用且不是本程序。请重启电脑后重新打开本程序。", PORT)
         webbrowser.open(url)
         return
+
+    restore_login()   # 恢复上次登录：服务自停重启/重开后仍保持登录，免每次重扫
 
     # 首次运行（本地基础表为空）铺内置的 7 张默认基础表，离线开箱即用；本地非空则跳过，
     # 升级不覆盖估价师攒的版本。之后可在基础表页「从钉钉拉取」更新。

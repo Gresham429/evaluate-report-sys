@@ -1030,13 +1030,15 @@ def create_app() -> FastAPI:
             logger.error("登录回调失败（换 token/取用户信息/换 userid 某步）：%s", exc)
             raise HTTPException(status_code=400, detail=f"登录失败：{exc}") from exc
         session.set_operator(userid, info.get("name", ""))
-        logger.info("登录回调：④ 已记会话 operator=%s，跳回首页", userid)
+        session.persist_login()   # 写盘：服务自停重启/重开后仍保持登录，免每次重扫
+        logger.info("登录回调：④ 已记会话 operator=%s（已持久化），跳回首页", userid)
         return RedirectResponse("/")
 
     @app.get("/auth/logout")
     def auth_logout() -> RedirectResponse:
         """登出：清会话（之后回退 .env 过渡身份）。"""
         session.clear_operator()
+        session.persist_login()   # 删盘：登出后重开不再自动恢复
         return RedirectResponse("/")
 
     @app.get("/api/survey/list")

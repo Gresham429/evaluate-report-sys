@@ -13,12 +13,18 @@
 关掉即失效、下次启动重新登录/回退。
 """
 
+import json
 import logging
 
 from src.dingtalk import config, org
+from src.paths import app_dir
 from src.questionnaire.permissions import Viewer
 
 logger = logging.getLogger(__name__)
+
+# 登录会话落盘文件名（放 exe 旁 / 仓库根）：登录一次，重启/重开仍保持登录。
+# 只存 userid + 名字（非密钥）；授权仍按白名单实时判，安全不变。
+_SESSION_FILENAME = "登录会话.json"
 
 __all__ = [
     "begin_login",
@@ -29,6 +35,8 @@ __all__ = [
     "is_authorized",
     "is_logged_in",
     "operator_name",
+    "persist_login",
+    "restore_login",
     "set_operator",
     "viewer",
 ]
@@ -54,6 +62,45 @@ def clear_operator() -> None:
     """登出：清掉会话里的操作人（之后 current_operator 回退到 .env 过渡值）。"""
     _session.pop("operator", None)
     _session.pop("operator_name", None)
+
+
+def persist_login() -> None:
+    """把当前登录人写盘（无登录人则删文件）。best-effort，失败只告警不影响主流程。
+
+    登录后调它 → 服务重启/重开（关网页自停后再打开）仍保持登录，免每次重扫码。登出后调它删文件。
+    """
+    path = app_dir() / _SESSION_FILENAME
+    try:
+        op = _session.get("operator")
+        if op:
+            path.write_text(
+                json.dumps(
+                    {"operator": op, "operator_name": _session.get("operator_name", "")},
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+        else:
+            path.unlink(missing_ok=True)
+    except OSError:
+        logger.warning("登录会话持久化失败：%s", path, exc_info=True)
+
+
+def restore_login() -> None:
+    """启动时从磁盘恢复上次登录（若有）。坏文件/缺文件都不崩，当作未登录。"""
+    path = app_dir() / _SESSION_FILENAME
+    if not path.exists():
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        uid = str(data.get("operator") or "") if isinstance(data, dict) else ""
+    except (OSError, json.JSONDecodeError, ValueError):
+        logger.warning("恢复登录会话失败（文件损坏？）：%s", path, exc_info=True)
+        return
+    if uid:
+        _session["operator"] = uid
+        _session["operator_name"] = str(data.get("operator_name") or "")
+        logger.info("已恢复上次登录：operator=%s", uid)
 
 
 def operator_name() -> str:
